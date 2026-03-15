@@ -318,7 +318,6 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
       pluginId: normalized.entry.pluginId,
       entry: normalized.entry.entry,
       events: normalized.events,
-      source: normalized.entry.source,
     });
 
     const hookSystemEnabled = config?.hooks?.internal?.enabled === true;
@@ -644,13 +643,16 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
         ) as PluginHookHandlerMap[K];
       }
     }
-    record.hookCount += 1;
-    registry.typedHooks.push({
-      ...normalized.entry,
-      pluginId: record.id,
-      hookName: normalized.hookName,
-      handler: effectiveHandler,
-    } as TypedPluginHookRegistration);
+    addExtensionTypedHookRegistration({
+      registry,
+      record,
+      entry: {
+        ...normalized.entry,
+        pluginId: record.id,
+        hookName: normalized.hookName,
+        handler: effectiveHandler,
+      } as TypedPluginHookRegistration,
+    });
   };
 
   const normalizeLogger = (logger: PluginLogger): PluginLogger => ({

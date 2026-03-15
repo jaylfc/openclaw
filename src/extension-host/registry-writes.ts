@@ -1,8 +1,10 @@
+import { registerContextEngine, type ContextEngineFactory } from "../context-engine/registry.js";
 import type { GatewayRequestHandler } from "../gateway/server-methods/types.js";
 import type {
   PluginChannelRegistration,
   PluginCliRegistration,
   PluginCommandRegistration,
+  PluginHookRegistration,
   PluginHttpRouteRegistration,
   PluginRecord,
   PluginRegistry,
@@ -10,10 +12,13 @@ import type {
   PluginServiceRegistration,
   PluginToolRegistration,
 } from "../plugins/registry.js";
+import type { PluginHookRegistration as TypedPluginHookRegistration } from "../plugins/types.js";
 import type {
   ExtensionHostChannelRegistration,
   ExtensionHostCliRegistration,
   ExtensionHostCommandRegistration,
+  ExtensionHostContextEngineRegistration,
+  ExtensionHostLegacyHookRegistration,
   ExtensionHostHttpRouteRegistration,
   ExtensionHostProviderRegistration,
   ExtensionHostServiceRegistration,
@@ -69,6 +74,31 @@ export function addExtensionProviderRegistration(params: {
   params.registry.providers.push(params.entry as PluginProviderRegistration);
 }
 
+export function addExtensionLegacyHookRegistration(params: {
+  registry: PluginRegistry;
+  record: PluginRecord;
+  hookName: string;
+  entry: ExtensionHostLegacyHookRegistration;
+  events: string[];
+}): void {
+  params.record.hookNames.push(params.hookName);
+  params.registry.hooks.push({
+    pluginId: params.entry.pluginId,
+    entry: params.entry.entry,
+    events: params.events,
+    source: params.entry.source,
+  } as PluginHookRegistration);
+}
+
+export function addExtensionTypedHookRegistration(params: {
+  registry: PluginRegistry;
+  record: PluginRecord;
+  entry: TypedPluginHookRegistration;
+}): void {
+  params.record.hookCount += 1;
+  params.registry.typedHooks.push(params.entry);
+}
+
 export function addExtensionToolRegistration(params: {
   registry: PluginRegistry;
   record: PluginRecord;
@@ -109,4 +139,12 @@ export function addExtensionCommandRegistration(params: {
 }): void {
   params.record.commands.push(params.commandName);
   params.registry.commands.push(params.entry as PluginCommandRegistration);
+}
+
+export function addExtensionContextEngineRegistration(params: {
+  entry: ExtensionHostContextEngineRegistration;
+  registerEngine?: (engineId: string, factory: ContextEngineFactory) => void;
+}): void {
+  const registerEngine = params.registerEngine ?? registerContextEngine;
+  registerEngine(params.entry.engineId, params.entry.factory);
 }

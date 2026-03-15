@@ -1,14 +1,17 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createEmptyPluginRegistry, type PluginRecord } from "../plugins/registry.js";
 import {
   addExtensionChannelRegistration,
   addExtensionCliRegistration,
   addExtensionCommandRegistration,
+  addExtensionContextEngineRegistration,
   addExtensionGatewayMethodRegistration,
+  addExtensionLegacyHookRegistration,
   addExtensionHttpRouteRegistration,
   addExtensionProviderRegistration,
   addExtensionServiceRegistration,
   addExtensionToolRegistration,
+  addExtensionTypedHookRegistration,
 } from "./registry-writes.js";
 
 function createRecord(): PluginRecord {
@@ -151,5 +154,49 @@ describe("extension host registry writes", () => {
     expect(registry.httpRoutes).toHaveLength(1);
     expect(registry.channels).toHaveLength(1);
     expect(registry.providers).toHaveLength(1);
+  });
+
+  it("writes legacy hooks, typed hooks, and context engines through host helpers", () => {
+    const registry = createEmptyPluginRegistry();
+    const record = createRecord();
+    const registerEngine = vi.fn();
+
+    addExtensionLegacyHookRegistration({
+      registry,
+      record,
+      hookName: "before_send",
+      events: ["before_send"],
+      entry: {
+        pluginId: record.id,
+        entry: {} as never,
+        events: ["before_send"],
+        source: record.source,
+        handler: (() => {}) as never,
+      },
+    });
+    addExtensionTypedHookRegistration({
+      registry,
+      record,
+      entry: {
+        pluginId: record.id,
+        hookName: "before_send" as never,
+        handler: (() => {}) as never,
+        priority: 0,
+        source: record.source,
+      } as never,
+    });
+    addExtensionContextEngineRegistration({
+      entry: {
+        engineId: "context-demo",
+        factory: (() => ({}) as never) as never,
+      },
+      registerEngine,
+    });
+
+    expect(record.hookNames).toEqual(["before_send"]);
+    expect(record.hookCount).toBe(1);
+    expect(registry.hooks).toHaveLength(1);
+    expect(registry.typedHooks).toHaveLength(1);
+    expect(registerEngine).toHaveBeenCalledWith("context-demo", expect.any(Function));
   });
 });
