@@ -3,6 +3,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTrackedTempDirs } from "../test-utils/tracked-temp-dirs.js";
 import {
+  clearDeviceBootstrapTokens,
   DEVICE_BOOTSTRAP_TOKEN_TTL_MS,
   issueDeviceBootstrapToken,
   verifyDeviceBootstrapToken,
@@ -70,6 +71,37 @@ describe("device bootstrap tokens", () => {
     ).resolves.toEqual({ ok: false, reason: "bootstrap_token_invalid" });
 
     await expect(fs.readFile(resolveBootstrapPath(baseDir), "utf8")).resolves.toBe("{}");
+  });
+
+  it("clears outstanding bootstrap tokens on demand", async () => {
+    const baseDir = await createTempDir();
+    const first = await issueDeviceBootstrapToken({ baseDir });
+    const second = await issueDeviceBootstrapToken({ baseDir });
+
+    await expect(clearDeviceBootstrapTokens({ baseDir })).resolves.toEqual({ removed: 2 });
+    await expect(fs.readFile(resolveBootstrapPath(baseDir), "utf8")).resolves.toBe("{}");
+
+    await expect(
+      verifyDeviceBootstrapToken({
+        token: first.token,
+        deviceId: "device-123",
+        publicKey: "public-key-123",
+        role: "operator.admin",
+        scopes: ["operator.admin"],
+        baseDir,
+      }),
+    ).resolves.toEqual({ ok: false, reason: "bootstrap_token_invalid" });
+
+    await expect(
+      verifyDeviceBootstrapToken({
+        token: second.token,
+        deviceId: "device-123",
+        publicKey: "public-key-123",
+        role: "operator.admin",
+        scopes: ["operator.admin"],
+        baseDir,
+      }),
+    ).resolves.toEqual({ ok: false, reason: "bootstrap_token_invalid" });
   });
 
   it("keeps the token when required verification fields are blank", async () => {

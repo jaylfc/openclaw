@@ -353,6 +353,55 @@ public final class OpenClawChatViewModel {
         }
     }
 
+    private static func reconcileRunRefreshMessages(
+        previous: [OpenClawChatMessage],
+        incoming: [OpenClawChatMessage]) -> [OpenClawChatMessage]
+    {
+        guard !previous.isEmpty else { return incoming }
+        guard !incoming.isEmpty else { return previous }
+
+        var reconciled = Self.reconcileMessageIDs(previous: previous, incoming: incoming)
+        let incomingIdentityKeys = Set(reconciled.compactMap(Self.messageIdentityKey(for:)))
+
+        var lastMatchedPreviousIndex: Int?
+        for (index, message) in previous.enumerated() {
+            guard let key = Self.messageIdentityKey(for: message),
+                  incomingIdentityKeys.contains(key)
+            else {
+                continue
+            }
+            lastMatchedPreviousIndex = index
+        }
+
+        let trailingUserMessages = (lastMatchedPreviousIndex != nil
+            ? previous.suffix(from: previous.index(after: lastMatchedPreviousIndex!))
+            : ArraySlice(previous))
+            .filter { message in
+                guard message.role.lowercased() == "user" else { return false }
+                guard let key = Self.messageIdentityKey(for: message) else { return false }
+                return !incomingIdentityKeys.contains(key)
+            }
+
+        guard !trailingUserMessages.isEmpty else {
+            return reconciled
+        }
+
+        for message in trailingUserMessages {
+            guard let messageTimestamp = message.timestamp else {
+                reconciled.append(message)
+                continue
+            }
+
+            let insertIndex = reconciled.firstIndex { existing in
+                guard let existingTimestamp = existing.timestamp else { return false }
+                return existingTimestamp > messageTimestamp
+            } ?? reconciled.endIndex
+            reconciled.insert(message, at: insertIndex)
+        }
+
+        return Self.dedupeMessages(reconciled)
+    }
+
     private static func dedupeMessages(_ messages: [OpenClawChatMessage]) -> [OpenClawChatMessage] {
         var result: [OpenClawChatMessage] = []
         result.reserveCapacity(messages.count)
@@ -919,7 +968,7 @@ public final class OpenClawChatViewModel {
     private func refreshHistoryAfterRun() async {
         do {
             let payload = try await self.transport.requestHistory(sessionKey: self.sessionKey)
-            self.messages = Self.reconcileMessageIDs(
+            self.messages = Self.reconcileRunRefreshMessages(
                 previous: self.messages,
                 incoming: Self.decodeMessages(payload.messages ?? []))
             self.sessionId = payload.sessionId

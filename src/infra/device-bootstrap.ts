@@ -79,6 +79,19 @@ export async function issueDeviceBootstrapToken(
   });
 }
 
+export async function clearDeviceBootstrapTokens(
+  params: {
+    baseDir?: string;
+  } = {},
+): Promise<{ removed: number }> {
+  return await withLock(async () => {
+    const state = await loadState(params.baseDir);
+    const removed = Object.keys(state).length;
+    await persistState({}, params.baseDir);
+    return { removed };
+  });
+}
+
 export async function verifyDeviceBootstrapToken(params: {
   token: string;
   deviceId: string;

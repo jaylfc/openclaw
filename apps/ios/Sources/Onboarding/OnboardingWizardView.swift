@@ -724,6 +724,12 @@ struct OnboardingWizardView: View {
             TextField("Discovery Domain (optional)", text: self.$discoveryDomain)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
+            if self.selectedMode == .remoteDomain {
+                TextField("Gateway Auth Token", text: self.$gatewayToken)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                SecureField("Gateway Password", text: self.$gatewayPassword)
+            }
             self.manualConnectButton
         }
     }
