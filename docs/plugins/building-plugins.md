@@ -24,11 +24,17 @@ and users install with `openclaw plugins install <npm-spec>`.
 
 ## What kind of plugin?
 
-| I want to add...                         | Guide                                             |
-| ---------------------------------------- | ------------------------------------------------- |
-| A messaging channel (Discord, IRC, etc.) | [Channel Plugins](/plugins/sdk-channel-plugins)   |
-| A model provider (LLM)                   | [Provider Plugins](/plugins/sdk-provider-plugins) |
-| Agent tools, hooks, or services          | Continue below                                    |
+<CardGroup cols={3}>
+  <Card title="Channel plugin" icon="message" href="/plugins/sdk-channel-plugins">
+    Connect OpenClaw to a messaging platform (Discord, IRC, etc.)
+  </Card>
+  <Card title="Provider plugin" icon="microchip" href="/plugins/sdk-provider-plugins">
+    Add a model provider (LLM, proxy, or custom endpoint)
+  </Card>
+  <Card title="Tool / hook plugin" icon="wrench">
+    Register agent tools, event hooks, or services — continue below
+  </Card>
+</CardGroup>
 
 ## Quick start: tool plugin
 
@@ -36,18 +42,9 @@ This walkthrough creates a minimal plugin that registers an agent tool. Channel
 and provider plugins have dedicated guides linked above.
 
 <Steps>
-  <Step title="Create the package">
-
-    ```
-    my-plugin/
-    ├── package.json
-    ├── openclaw.plugin.json
-    └── index.ts
-    ```
-
-    **package.json:**
-
-    ```json
+  <Step title="Create the package and manifest">
+    <CodeGroup>
+    ```json package.json
     {
       "name": "@myorg/openclaw-my-plugin",
       "version": "1.0.0",
@@ -58,12 +55,7 @@ and provider plugins have dedicated guides linked above.
     }
     ```
 
-  </Step>
-
-  <Step title="Add the manifest">
-    Create `openclaw.plugin.json`:
-
-    ```json
+    ```json openclaw.plugin.json
     {
       "id": "my-plugin",
       "name": "My Plugin",
@@ -74,9 +66,10 @@ and provider plugins have dedicated guides linked above.
       }
     }
     ```
+    </CodeGroup>
 
-    Every plugin needs a manifest, even with no config. See [Manifest](/plugins/manifest)
-    for the full schema.
+    Every plugin needs a manifest, even with no config. See
+    [Manifest](/plugins/manifest) for the full schema.
 
   </Step>
 
@@ -221,13 +214,23 @@ internal imports — never import your own plugin through its SDK path.
 
 ## Next steps
 
-- [Channel Plugins](/plugins/sdk-channel-plugins) — build a messaging channel
-- [Provider Plugins](/plugins/sdk-provider-plugins) — build a model provider
-- [SDK Overview](/plugins/sdk-overview) — import map and registration API reference
-- [SDK Runtime](/plugins/sdk-runtime) — `api.runtime` helpers (TTS, search, subagent)
-- [SDK Setup](/plugins/sdk-setup) — packaging, manifests, setup wizards
-- [SDK Testing](/plugins/sdk-testing) — test utilities and patterns
-- [SDK Migration](/plugins/sdk-migration) — migrating from deprecated surfaces
-- [Plugin Manifest](/plugins/manifest) — full manifest schema
-- [Plugin Internals](/plugins/architecture) — deep architecture reference
-- [Community Plugins](/plugins/community) — listing and quality bar
+<CardGroup cols={2}>
+  <Card title="Channel Plugins" icon="message" href="/plugins/sdk-channel-plugins">
+    Build a messaging channel plugin
+  </Card>
+  <Card title="Provider Plugins" icon="microchip" href="/plugins/sdk-provider-plugins">
+    Build a model provider plugin
+  </Card>
+  <Card title="SDK Overview" icon="book" href="/plugins/sdk-overview">
+    Import map and registration API reference
+  </Card>
+  <Card title="Runtime Helpers" icon="gear" href="/plugins/sdk-runtime">
+    TTS, search, subagent via api.runtime
+  </Card>
+  <Card title="Testing" icon="flask" href="/plugins/sdk-testing">
+    Test utilities and patterns
+  </Card>
+  <Card title="Plugin Manifest" icon="file-code" href="/plugins/manifest">
+    Full manifest schema reference
+  </Card>
+</CardGroup>

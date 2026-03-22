@@ -37,81 +37,75 @@ prevents circular dependency issues.
 
 ## Subpath reference
 
+The most commonly used subpaths, grouped by purpose. The full list of 100+
+subpaths is in `scripts/lib/plugin-sdk-entrypoints.json`.
+
 ### Plugin entry
 
-| Subpath                   | Key exports                                                                                                                                                                |
-| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `plugin-sdk/plugin-entry` | `definePluginEntry`                                                                                                                                                        |
-| `plugin-sdk/core`         | `defineChannelPluginEntry`, `createChatChannelPlugin`, `createChannelPluginBase`, `defineSetupPluginEntry`, `buildChannelConfigSchema`, `buildChannelOutboundSessionRoute` |
+| Subpath                   | Key exports                                                                                                                            |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `plugin-sdk/plugin-entry` | `definePluginEntry`                                                                                                                    |
+| `plugin-sdk/core`         | `defineChannelPluginEntry`, `createChatChannelPlugin`, `createChannelPluginBase`, `defineSetupPluginEntry`, `buildChannelConfigSchema` |
 
-### Channel
+<AccordionGroup>
+  <Accordion title="Channel subpaths">
+    | Subpath | Key exports |
+    | --- | --- |
+    | `plugin-sdk/channel-setup` | `createOptionalChannelSetupSurface` |
+    | `plugin-sdk/channel-pairing` | `createChannelPairingController` |
+    | `plugin-sdk/channel-reply-pipeline` | `createChannelReplyPipeline` |
+    | `plugin-sdk/channel-config-helpers` | `createHybridChannelConfigAdapter` |
+    | `plugin-sdk/channel-config-schema` | Channel config schema types |
+    | `plugin-sdk/channel-policy` | `resolveChannelGroupRequireMention` |
+    | `plugin-sdk/channel-lifecycle` | `createAccountStatusSink` |
+    | `plugin-sdk/channel-inbound` | Debounce, mention matching, envelope helpers |
+    | `plugin-sdk/channel-send-result` | Reply result types |
+    | `plugin-sdk/channel-actions` | `createMessageToolButtonsSchema`, `createMessageToolCardSchema` |
+    | `plugin-sdk/channel-targets` | Target parsing/matching helpers |
+    | `plugin-sdk/channel-contract` | Channel contract types |
+    | `plugin-sdk/channel-feedback` | Feedback/reaction wiring |
+  </Accordion>
 
-| Subpath                             | Key exports                                                     |
-| ----------------------------------- | --------------------------------------------------------------- |
-| `plugin-sdk/channel-setup`          | `createOptionalChannelSetupSurface`                             |
-| `plugin-sdk/channel-pairing`        | `createChannelPairingController`                                |
-| `plugin-sdk/channel-reply-pipeline` | `createChannelReplyPipeline`                                    |
-| `plugin-sdk/channel-config-helpers` | `createHybridChannelConfigAdapter`                              |
-| `plugin-sdk/channel-config-schema`  | Channel config schema types                                     |
-| `plugin-sdk/channel-policy`         | `resolveChannelGroupRequireMention`                             |
-| `plugin-sdk/channel-lifecycle`      | `createAccountStatusSink`                                       |
-| `plugin-sdk/channel-inbound`        | Debounce, mention matching, envelope helpers                    |
-| `plugin-sdk/channel-send-result`    | Reply result types                                              |
-| `plugin-sdk/channel-actions`        | `createMessageToolButtonsSchema`, `createMessageToolCardSchema` |
-| `plugin-sdk/channel-targets`        | Target parsing/matching helpers                                 |
-| `plugin-sdk/channel-contract`       | Channel contract types                                          |
-| `plugin-sdk/channel-feedback`       | Feedback/reaction wiring                                        |
+  <Accordion title="Provider subpaths">
+    | Subpath | Key exports |
+    | --- | --- |
+    | `plugin-sdk/provider-auth` | `createProviderApiKeyAuthMethod`, `ensureApiKeyFromOptionEnvOrPrompt`, `upsertAuthProfile` |
+    | `plugin-sdk/provider-models` | `normalizeModelCompat` |
+    | `plugin-sdk/provider-catalog` | Catalog type re-exports |
+    | `plugin-sdk/provider-usage` | `fetchClaudeUsage` and similar |
+    | `plugin-sdk/provider-stream` | Stream wrapper types |
+    | `plugin-sdk/provider-onboard` | Onboarding config patch helpers |
+  </Accordion>
 
-### Provider
+  <Accordion title="Auth and security subpaths">
+    | Subpath | Key exports |
+    | --- | --- |
+    | `plugin-sdk/command-auth` | `resolveControlCommandGate` |
+    | `plugin-sdk/allow-from` | `formatAllowFromLowercase` |
+    | `plugin-sdk/secret-input` | Secret input parsing helpers |
+    | `plugin-sdk/webhook-ingress` | Webhook request/target helpers |
+  </Accordion>
 
-| Subpath                       | Key exports                                                                                |
-| ----------------------------- | ------------------------------------------------------------------------------------------ |
-| `plugin-sdk/provider-auth`    | `createProviderApiKeyAuthMethod`, `ensureApiKeyFromOptionEnvOrPrompt`, `upsertAuthProfile` |
-| `plugin-sdk/provider-models`  | `normalizeModelCompat`                                                                     |
-| `plugin-sdk/provider-catalog` | Catalog type re-exports                                                                    |
-| `plugin-sdk/provider-usage`   | `fetchClaudeUsage` and similar                                                             |
-| `plugin-sdk/provider-stream`  | Stream wrapper types                                                                       |
-| `plugin-sdk/provider-onboard` | Onboarding config patch helpers                                                            |
+  <Accordion title="Runtime and storage subpaths">
+    | Subpath | Key exports |
+    | --- | --- |
+    | `plugin-sdk/runtime-store` | `createPluginRuntimeStore` |
+    | `plugin-sdk/config-runtime` | Config load/write helpers |
+    | `plugin-sdk/infra-runtime` | System event/heartbeat helpers |
+    | `plugin-sdk/agent-runtime` | Agent dir/identity/workspace helpers |
+    | `plugin-sdk/directory-runtime` | Config-backed directory query/dedup |
+    | `plugin-sdk/keyed-async-queue` | `KeyedAsyncQueue` |
+  </Accordion>
 
-### Auth and security
-
-| Subpath                      | Key exports                    |
-| ---------------------------- | ------------------------------ |
-| `plugin-sdk/command-auth`    | `resolveControlCommandGate`    |
-| `plugin-sdk/allow-from`      | `formatAllowFromLowercase`     |
-| `plugin-sdk/secret-input`    | Secret input parsing helpers   |
-| `plugin-sdk/webhook-ingress` | Webhook request/target helpers |
-
-### Runtime and storage
-
-| Subpath                        | Key exports                          |
-| ------------------------------ | ------------------------------------ |
-| `plugin-sdk/runtime-store`     | `createPluginRuntimeStore`           |
-| `plugin-sdk/config-runtime`    | Config load/write helpers            |
-| `plugin-sdk/infra-runtime`     | System event/heartbeat helpers       |
-| `plugin-sdk/agent-runtime`     | Agent dir/identity/workspace helpers |
-| `plugin-sdk/directory-runtime` | Config-backed directory query/dedup  |
-| `plugin-sdk/keyed-async-queue` | `KeyedAsyncQueue`                    |
-
-### Capabilities
-
-| Subpath                          | Key exports                        |
-| -------------------------------- | ---------------------------------- |
-| `plugin-sdk/image-generation`    | Image generation provider types    |
-| `plugin-sdk/media-understanding` | Media understanding provider types |
-| `plugin-sdk/speech`              | Speech provider types              |
-
-### Testing
-
-| Subpath              | Key exports                                                 |
-| -------------------- | ----------------------------------------------------------- |
-| `plugin-sdk/testing` | `installCommonResolveTargetErrorCases`, `shouldAckReaction` |
-
-<Info>
-  The full list of 100+ subpaths is generated from
-  `scripts/lib/plugin-sdk-entrypoints.json`. The tables above cover the most
-  commonly used paths. Use the narrowest subpath that matches the job.
-</Info>
+  <Accordion title="Capability and testing subpaths">
+    | Subpath | Key exports |
+    | --- | --- |
+    | `plugin-sdk/image-generation` | Image generation provider types |
+    | `plugin-sdk/media-understanding` | Media understanding provider types |
+    | `plugin-sdk/speech` | Speech provider types |
+    | `plugin-sdk/testing` | `installCommonResolveTargetErrorCases`, `shouldAckReaction` |
+  </Accordion>
+</AccordionGroup>
 
 ## Registration API
 
