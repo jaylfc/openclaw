@@ -363,12 +363,12 @@ details.usage-filter-select summary::-webkit-details-marker,
   z-index: 12;
 }
 
-.usage-filter-popover {
-  left: 0;
+.usage-filter-popover,
+.usage-export-popover {
+  right: 0;
 }
 
 .usage-export-popover {
-  right: 0;
   width: 220px;
 }
 
