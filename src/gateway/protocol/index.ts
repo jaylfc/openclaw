@@ -138,6 +138,10 @@ import {
   GatewayFrameSchema,
   type HelloOk,
   HelloOkSchema,
+  type LogsSubscribeParams,
+  LogsSubscribeParamsSchema,
+  type LogsSubscribeResult,
+  LogsSubscribeResultSchema,
   type LogsTailParams,
   LogsTailParamsSchema,
   type LogsTailResult,
@@ -463,6 +467,8 @@ export const validateExecApprovalsNodeGetParams = ajv.compile<ExecApprovalsNodeG
 export const validateExecApprovalsNodeSetParams = ajv.compile<ExecApprovalsNodeSetParams>(
   ExecApprovalsNodeSetParamsSchema,
 );
+export const validateLogsSubscribeParams =
+  ajv.compile<LogsSubscribeParams>(LogsSubscribeParamsSchema);
 export const validateLogsTailParams = ajv.compile<LogsTailParams>(LogsTailParamsSchema);
 export const validateChatHistoryParams = ajv.compile(ChatHistoryParamsSchema);
 export const validateChatSendParams = ajv.compile(ChatSendParamsSchema);
@@ -613,6 +619,8 @@ export {
   CronRemoveParamsSchema,
   CronRunParamsSchema,
   CronRunsParamsSchema,
+  LogsSubscribeParamsSchema,
+  LogsSubscribeResultSchema,
   LogsTailParamsSchema,
   LogsTailResultSchema,
   ChatHistoryParamsSchema,
@@ -736,6 +744,8 @@ export type {
   ExecApprovalsGetParams,
   ExecApprovalsSetParams,
   ExecApprovalsSnapshot,
+  LogsSubscribeParams,
+  LogsSubscribeResult,
   LogsTailParams,
   LogsTailResult,
   PollParams,
