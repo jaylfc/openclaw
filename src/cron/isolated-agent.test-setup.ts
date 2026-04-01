@@ -12,7 +12,21 @@ type TestSendFn = (
   to: string,
   text: string,
   options?: Record<string, unknown>,
-) => Promise<Record<string, unknown>>;
+) => Promise<{ messageId?: string } & Record<string, unknown>>;
+
+function withRequiredMessageId(
+  channel: "signal" | "telegram",
+  result: Awaited<ReturnType<TestSendFn>>,
+) {
+  return {
+    channel,
+    ...result,
+    messageId:
+      typeof result.messageId === "string" && result.messageId.trim()
+        ? result.messageId
+        : `${channel}-test-message`,
+  };
+}
 
 function parseTelegramTargetForTest(raw: string): {
   chatId: string;
@@ -86,24 +100,26 @@ const telegramOutboundForTest: ChannelOutboundAdapter = {
 
 const signalOutboundForTest: ChannelOutboundAdapter = {
   deliveryMode: "direct",
-  sendText: async ({ cfg, to, text, accountId, deps }) => ({
-    channel: "signal",
-    ...(await resolveTestSender("signal", deps)(to, text, {
-      cfg,
-      accountId: accountId ?? undefined,
-    })),
-  }),
+  sendText: async ({ cfg, to, text, accountId, deps }) =>
+    withRequiredMessageId(
+      "signal",
+      await resolveTestSender("signal", deps)(to, text, {
+        cfg,
+        accountId: accountId ?? undefined,
+      }),
+    ),
   resolveTarget: ({ to }) => resolveRequiredTarget("Signal", to),
 };
 
-telegramOutboundForTest.sendText = async ({ cfg, to, text, accountId, deps, threadId }) => ({
-  channel: "telegram",
-  ...(await resolveTestSender("telegram", deps)(to, text, {
-    cfg,
-    accountId: accountId ?? undefined,
-    messageThreadId: threadId ?? undefined,
-  })),
-});
+telegramOutboundForTest.sendText = async ({ cfg, to, text, accountId, deps, threadId }) =>
+  withRequiredMessageId(
+    "telegram",
+    await resolveTestSender("telegram", deps)(to, text, {
+      cfg,
+      accountId: accountId ?? undefined,
+      messageThreadId: threadId ?? undefined,
+    }),
+  );
 
 telegramOutboundForTest.sendMedia = async ({
   cfg,
@@ -115,17 +131,18 @@ telegramOutboundForTest.sendMedia = async ({
   accountId,
   deps,
   threadId,
-}) => ({
-  channel: "telegram",
-  ...(await resolveTestSender("telegram", deps)(to, text, {
-    cfg,
-    mediaUrl,
-    mediaLocalRoots,
-    mediaReadFile,
-    accountId: accountId ?? undefined,
-    messageThreadId: threadId ?? undefined,
-  })),
-});
+}) =>
+  withRequiredMessageId(
+    "telegram",
+    await resolveTestSender("telegram", deps)(to, text, {
+      cfg,
+      mediaUrl,
+      mediaLocalRoots,
+      mediaReadFile,
+      accountId: accountId ?? undefined,
+      messageThreadId: threadId ?? undefined,
+    }),
+  );
 
 export function setupIsolatedAgentTurnMocks(params?: { fast?: boolean }): void {
   if (params?.fast) {
