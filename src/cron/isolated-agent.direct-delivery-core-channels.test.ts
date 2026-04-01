@@ -88,7 +88,18 @@ type TestSendFn = (
   to: string,
   text: string,
   options?: Record<string, unknown>,
-) => Promise<Record<string, unknown>>;
+) => Promise<{ messageId?: string } & Record<string, unknown>>;
+
+function withRequiredMessageId(channel: CoreChannel, result: Awaited<ReturnType<TestSendFn>>) {
+  return {
+    channel,
+    ...result,
+    messageId:
+      typeof result.messageId === "string" && result.messageId.trim()
+        ? result.messageId
+        : `${channel}-test-message`,
+  };
+}
 
 function resolveCoreChannelSender(
   channel: CoreChannel,
@@ -109,13 +120,14 @@ function createCliDelegatingOutbound(params: {
   return {
     deliveryMode: params.deliveryMode ?? "direct",
     ...(params.resolveTarget ? { resolveTarget: params.resolveTarget } : {}),
-    sendText: async ({ cfg, to, text, accountId, deps }) => ({
-      channel: params.channel,
-      ...(await resolveCoreChannelSender(params.channel, deps)(to, text, {
-        cfg,
-        accountId: accountId ?? undefined,
-      })),
-    }),
+    sendText: async ({ cfg, to, text, accountId, deps }) =>
+      withRequiredMessageId(
+        params.channel,
+        await resolveCoreChannelSender(params.channel, deps)(to, text, {
+          cfg,
+          accountId: accountId ?? undefined,
+        }),
+      ),
   };
 }
 
