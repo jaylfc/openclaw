@@ -12,7 +12,7 @@ import {
   mkdirSafeDir,
 } from "../plugins/test-helpers/fs-fixtures.js";
 import { applyPluginAutoEnable } from "./plugin-auto-enable.js";
-import { validateConfigObject } from "./validation.js";
+import { validateConfigObjectRaw } from "./validation.js";
 
 const tempDirs: string[] = [];
 
@@ -326,7 +326,7 @@ describe("applyPluginAutoEnable", () => {
     });
 
     expect(result.config.channels?.whatsapp?.enabled).toBe(true);
-    const validated = validateConfigObject(result.config);
+    const validated = validateConfigObjectRaw(result.config);
     expect(validated.ok).toBe(true);
   });
 
@@ -347,7 +347,7 @@ describe("applyPluginAutoEnable", () => {
 
     expect(result.config.channels?.whatsapp?.enabled).toBe(true);
     expect(result.config.plugins?.allow).toEqual(["telegram"]);
-    const validated = validateConfigObject(result.config);
+    const validated = validateConfigObjectRaw(result.config);
     expect(validated.ok).toBe(true);
   });
 
