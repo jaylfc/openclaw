@@ -1,10 +1,13 @@
 import "./isolated-agent.mocks.js";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { runSubagentAnnounceFlow } from "../agents/subagent-announce.js";
-import type { ChannelOutboundAdapter, ChannelOutboundContext } from "../channels/plugins/types.js";
+import type {
+  ChannelId,
+  ChannelOutboundAdapter,
+  ChannelOutboundContext,
+} from "../channels/plugins/types.js";
 import type { CliDeps } from "../cli/deps.js";
 import { resolveOutboundSendDep } from "../infra/outbound/send-deps.js";
-import { createWhatsAppTestPlugin } from "../infra/outbound/targets.test-helpers.js";
 import { setActivePluginRegistry } from "../plugins/runtime.js";
 import { createOutboundTestPlugin, createTestRegistry } from "../test-utils/channel-plugins.js";
 import { createCliDeps, mockAgentPayloads } from "./isolated-agent.delivery.test-helpers.js";
@@ -17,53 +20,11 @@ import {
 } from "./isolated-agent.test-harness.js";
 import { setupIsolatedAgentTurnMocks } from "./isolated-agent.test-setup.js";
 
-type ChannelCase = {
-  name: string;
-  channel: "slack" | "discord" | "whatsapp" | "imessage";
-  to: string;
-  sendKey: keyof Pick<
-    CliDeps,
-    "sendMessageSlack" | "sendMessageDiscord" | "sendMessageWhatsApp" | "sendMessageIMessage"
-  >;
-  expectedTo: string;
-};
-
-const CASES: ChannelCase[] = [
-  {
-    name: "Slack",
-    channel: "slack",
-    to: "channel:C12345",
-    sendKey: "sendMessageSlack",
-    expectedTo: "channel:C12345",
-  },
-  {
-    name: "Discord",
-    channel: "discord",
-    to: "channel:789",
-    sendKey: "sendMessageDiscord",
-    expectedTo: "channel:789",
-  },
-  {
-    name: "WhatsApp",
-    channel: "whatsapp",
-    to: "+15551234567",
-    sendKey: "sendMessageWhatsApp",
-    expectedTo: "+15551234567",
-  },
-  {
-    name: "iMessage",
-    channel: "imessage",
-    to: "friend@example.com",
-    sendKey: "sendMessageIMessage",
-    expectedTo: "friend@example.com",
-  },
-];
-
 async function runExplicitAnnounceTurn(params: {
   home: string;
   storePath: string;
   deps: CliDeps;
-  channel: ChannelCase["channel"];
+  channel: ChannelId;
   to: string;
 }) {
   return await runCronIsolatedAgentTurn({
@@ -83,7 +44,7 @@ async function runExplicitAnnounceTurn(params: {
   });
 }
 
-type CoreChannel = ChannelCase["channel"];
+type CoreChannel = "slack";
 type TestSendFn = (
   to: string,
   text: string,
@@ -131,81 +92,107 @@ function createCliDelegatingOutbound(params: {
   };
 }
 
-const whatsappResolveTarget = createWhatsAppTestPlugin().outbound?.resolveTarget;
+const emptyRegistry = createTestRegistry([]);
 
 describe("runCronIsolatedAgentTurn core-channel direct delivery", () => {
   beforeEach(() => {
     setupIsolatedAgentTurnMocks();
-    setActivePluginRegistry(
-      createTestRegistry([
-        {
-          pluginId: "slack",
-          plugin: createOutboundTestPlugin({
-            id: "slack",
-            outbound: createCliDelegatingOutbound({ channel: "slack" }),
-          }),
-          source: "test",
-        },
-        {
-          pluginId: "discord",
-          plugin: createOutboundTestPlugin({
-            id: "discord",
-            outbound: createCliDelegatingOutbound({ channel: "discord" }),
-          }),
-          source: "test",
-        },
-        {
-          pluginId: "whatsapp",
-          plugin: createOutboundTestPlugin({
-            id: "whatsapp",
-            outbound: createCliDelegatingOutbound({
-              channel: "whatsapp",
-              deliveryMode: "gateway",
-              resolveTarget: whatsappResolveTarget,
-            }),
-          }),
-          source: "test",
-        },
-        {
-          pluginId: "imessage",
-          plugin: createOutboundTestPlugin({
-            id: "imessage",
-            outbound: createCliDelegatingOutbound({ channel: "imessage" }),
-          }),
-          source: "test",
-        },
-      ]),
-    );
+    setActivePluginRegistry(emptyRegistry);
   });
 
-  for (const testCase of CASES) {
-    it(`routes ${testCase.name} text-only announce delivery through the outbound adapter`, async () => {
-      await withTempCronHome(async (home) => {
-        const storePath = await writeSessionStore(home, { lastProvider: "webchat", lastTo: "" });
-        const deps = createCliDeps();
-        mockAgentPayloads([{ text: "hello from cron" }]);
+  it("routes a representative direct core-channel delivery through CLI send deps", async () => {
+    await withTempCronHome(async (home) => {
+      const storePath = await writeSessionStore(home, { lastProvider: "webchat", lastTo: "" });
+      const deps = createCliDeps();
+      mockAgentPayloads([{ text: "hello from cron" }]);
+      setActivePluginRegistry(
+        createTestRegistry([
+          {
+            pluginId: "slack",
+            plugin: createOutboundTestPlugin({
+              id: "slack",
+              outbound: createCliDelegatingOutbound({ channel: "slack" }),
+            }),
+            source: "test",
+          },
+        ]),
+      );
 
-        const res = await runExplicitAnnounceTurn({
-          home,
-          storePath,
-          deps,
-          channel: testCase.channel,
-          to: testCase.to,
-        });
-
-        expect(res.status).toBe("ok");
-        expect(res.delivered).toBe(true);
-        expect(res.deliveryAttempted).toBe(true);
-        expect(runSubagentAnnounceFlow).not.toHaveBeenCalled();
-
-        const sendFn = deps[testCase.sendKey];
-        expect(sendFn).toHaveBeenCalledTimes(1);
-        expect(sendFn).toHaveBeenCalledWith(
-          testCase.expectedTo,
-          "hello from cron",
-          expect.any(Object),
-        );
+      const res = await runExplicitAnnounceTurn({
+        home,
+        storePath,
+        deps,
+        channel: "slack",
+        to: "channel:C12345",
       });
+
+      expect(res.status).toBe("ok");
+      expect(res.delivered).toBe(true);
+      expect(res.deliveryAttempted).toBe(true);
+      expect(runSubagentAnnounceFlow).not.toHaveBeenCalled();
+      expect(deps.sendMessageSlack).toHaveBeenCalledTimes(1);
+      expect(deps.sendMessageSlack).toHaveBeenCalledWith(
+        "channel:C12345",
+        "hello from cron",
+        expect.any(Object),
+      );
     });
-  }
+  });
+
+  it("routes gateway resolveTarget delivery through the outbound adapter", async () => {
+    await withTempCronHome(async (home) => {
+      const storePath = await writeSessionStore(home, { lastProvider: "webchat", lastTo: "" });
+      const deps = createCliDeps();
+      const sendText = vi.fn(async ({ to, text }: { to: string; text: string }) => ({
+        channel: "demo-gateway" as const,
+        messageId: "demo-gateway-message",
+        conversationId: to,
+        meta: { echoedText: text },
+      }));
+      mockAgentPayloads([{ text: "hello from cron" }]);
+      setActivePluginRegistry(
+        createTestRegistry([
+          {
+            pluginId: "demo-gateway",
+            plugin: createOutboundTestPlugin({
+              id: "demo-gateway",
+              outbound: {
+                deliveryMode: "gateway",
+                resolveTarget: ({ to }) => {
+                  const normalized = String(to ?? "")
+                    .trim()
+                    .replace(/^user:/i, "");
+                  return normalized
+                    ? { ok: true as const, to: normalized }
+                    : { ok: false as const, error: new Error("target is required") };
+                },
+                sendText,
+              },
+            }),
+            source: "test",
+          },
+        ]),
+      );
+
+      const res = await runExplicitAnnounceTurn({
+        home,
+        storePath,
+        deps,
+        channel: "demo-gateway",
+        to: "user:target-123",
+      });
+
+      expect(res.status).toBe("ok");
+      expect(res.delivered).toBe(true);
+      expect(res.deliveryAttempted).toBe(true);
+      expect(runSubagentAnnounceFlow).not.toHaveBeenCalled();
+      expect(sendText).toHaveBeenCalledTimes(1);
+      expect(sendText).toHaveBeenCalledWith(
+        expect.objectContaining({
+          to: "target-123",
+          text: "hello from cron",
+        }),
+      );
+    });
+  });
 });
