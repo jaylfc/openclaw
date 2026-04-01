@@ -2,9 +2,9 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { whatsappOutbound } from "../../test/channel-outbounds.js";
 import { HEARTBEAT_PROMPT } from "../auto-reply/heartbeat.js";
 import * as replyModule from "../auto-reply/reply.js";
+import type { ChannelOutboundAdapter } from "../channels/plugins/types.js";
 import type { OpenClawConfig } from "../config/config.js";
 import {
   resolveAgentIdFromSessionKey,
@@ -12,6 +12,7 @@ import {
   resolveMainSessionKey,
   resolveStorePath,
 } from "../config/sessions.js";
+import { resolveWhatsAppOutboundTarget } from "../plugin-sdk/whatsapp-surface.js";
 import { getActivePluginRegistry, setActivePluginRegistry } from "../plugins/runtime.js";
 import { buildAgentPeerSessionKey } from "../routing/session-key.js";
 import { createOutboundTestPlugin, createTestRegistry } from "../test-utils/channel-plugins.js";
@@ -36,6 +37,37 @@ let testRegistry: ReturnType<typeof getActivePluginRegistry> | null = null;
 let fixtureRoot = "";
 let fixtureCount = 0;
 
+const heartbeatWhatsAppOutbound: ChannelOutboundAdapter = {
+  deliveryMode: "direct",
+  resolveTarget: ({ to, allowFrom, mode }) =>
+    resolveWhatsAppOutboundTarget({
+      to,
+      allowFrom,
+      mode,
+    }),
+  sendText: async ({ to, text, deps, accountId }) => {
+    if (!deps?.["whatsapp"]) {
+      throw new Error("sendWhatsApp missing");
+    }
+    const res = await (deps["whatsapp"] as Function)(to, text, {
+      verbose: false,
+      accountId: accountId ?? undefined,
+    });
+    return { channel: "whatsapp", messageId: res.messageId, toJid: res.toJid };
+  },
+  sendMedia: async ({ to, text, mediaUrl, deps, accountId }) => {
+    if (!deps?.["whatsapp"]) {
+      throw new Error("sendWhatsApp missing");
+    }
+    const res = await (deps["whatsapp"] as Function)(to, text, {
+      verbose: false,
+      accountId: accountId ?? undefined,
+      mediaUrl,
+    });
+    return { channel: "whatsapp", messageId: res.messageId, toJid: res.toJid };
+  },
+};
+
 const createCaseDir = async (prefix: string) => {
   const dir = path.join(fixtureRoot, `${prefix}-${fixtureCount++}`);
   await fs.mkdir(dir, { recursive: true });
@@ -45,7 +77,10 @@ const createCaseDir = async (prefix: string) => {
 beforeAll(async () => {
   previousRegistry = getActivePluginRegistry();
 
-  const whatsappPlugin = createOutboundTestPlugin({ id: "whatsapp", outbound: whatsappOutbound });
+  const whatsappPlugin = createOutboundTestPlugin({
+    id: "whatsapp",
+    outbound: heartbeatWhatsAppOutbound,
+  });
   whatsappPlugin.config = {
     ...whatsappPlugin.config,
     resolveAllowFrom: ({ cfg }) =>
