@@ -4,6 +4,7 @@ import {
   BUNDLED_PROVIDER_PLUGIN_ID_ALIASES,
 } from "./bundled-capability-metadata.js";
 import {
+  hasExplicitPluginConfig,
   isBundledChannelEnabledByChannelConfig,
   normalizePluginsConfigWithResolver,
   resolveEffectiveEnableState,
@@ -52,31 +53,6 @@ const hasExplicitMemorySlot = (plugins?: OpenClawConfig["plugins"]) =>
 
 const hasExplicitMemoryEntry = (plugins?: OpenClawConfig["plugins"]) =>
   Boolean(plugins?.entries && Object.prototype.hasOwnProperty.call(plugins.entries, "memory-core"));
-
-export const hasExplicitPluginConfig = (plugins?: OpenClawConfig["plugins"]) => {
-  if (!plugins) {
-    return false;
-  }
-  if (typeof plugins.enabled === "boolean") {
-    return true;
-  }
-  if (Array.isArray(plugins.allow) && plugins.allow.length > 0) {
-    return true;
-  }
-  if (Array.isArray(plugins.deny) && plugins.deny.length > 0) {
-    return true;
-  }
-  if (plugins.load?.paths && Array.isArray(plugins.load.paths) && plugins.load.paths.length > 0) {
-    return true;
-  }
-  if (plugins.slots && Object.keys(plugins.slots).length > 0) {
-    return true;
-  }
-  if (plugins.entries && Object.keys(plugins.entries).length > 0) {
-    return true;
-  }
-  return false;
-};
 
 export function applyTestPluginDefaults(
   cfg: OpenClawConfig,
