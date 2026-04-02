@@ -4,6 +4,7 @@ import type { SessionEntry } from "../../config/sessions/types.js";
 import { getActivePluginRegistry, setActivePluginRegistry } from "../../plugins/runtime.js";
 import {
   resolveHeartbeatDeliveryTarget,
+  resolveHeartbeatSenderContext,
   resolveOutboundTarget,
   resolveSessionDeliveryTarget,
 } from "./targets.js";
@@ -54,6 +55,23 @@ beforeEach(() => {
     ]),
   );
 });
+
+function createAccountAwareTelegramPlugin() {
+  const plugin = createTelegramTestPlugin();
+  plugin.config = {
+    ...plugin.config,
+    listAccountIds: (cfg) => Object.keys(cfg.channels?.telegram?.accounts ?? {}),
+    resolveAllowFrom: ({ cfg, accountId }) => {
+      const channel = cfg.channels?.telegram;
+      const normalized = accountId?.trim();
+      if (normalized && channel?.accounts?.[normalized]?.allowFrom) {
+        return channel.accounts[normalized].allowFrom?.map((entry) => String(entry)) ?? [];
+      }
+      return channel?.allowFrom?.map((entry) => String(entry)) ?? [];
+    },
+  };
+  return plugin;
+}
 
 describe("resolveOutboundTarget defaultTo config fallback", () => {
   installResolveOutboundTargetPluginRegistryHooks();
@@ -607,6 +625,161 @@ describe("resolveSessionDeliveryTarget", () => {
     expect(resolved.threadId).toBe(1008013);
   });
 
+  it("defaults heartbeat target to none when unset", () => {
+    const resolved = resolveHeartbeatDeliveryTarget({
+      cfg: {},
+      entry: {
+        sessionId: "sess-heartbeat-default-none",
+        updatedAt: 1,
+        lastChannel: "whatsapp",
+        lastTo: "120363401234567890@g.us",
+      },
+    });
+
+    expect(resolved).toEqual({
+      channel: "none",
+      reason: "target-none",
+      accountId: undefined,
+      lastChannel: "whatsapp",
+      lastAccountId: undefined,
+    });
+  });
+
+  it("normalizes explicit whatsapp heartbeat targets when allowFrom is wildcard", () => {
+    const resolved = resolveHeartbeatDeliveryTarget({
+      cfg: {
+        agents: {
+          defaults: {
+            heartbeat: { target: "whatsapp", to: "whatsapp:120363401234567890@G.US" },
+          },
+        },
+        channels: { whatsapp: { allowFrom: ["*"] } },
+      },
+    });
+
+    expect(resolved).toEqual({
+      channel: "whatsapp",
+      to: "120363401234567890@g.us",
+      accountId: undefined,
+      lastChannel: undefined,
+      lastAccountId: undefined,
+    });
+  });
+
+  it("rejects explicit whatsapp heartbeat targets outside allowFrom", () => {
+    const resolved = resolveHeartbeatDeliveryTarget({
+      cfg: {
+        agents: {
+          defaults: {
+            heartbeat: { target: "whatsapp", to: "+1999" },
+          },
+        },
+        channels: { whatsapp: { allowFrom: ["120363401234567890@g.us", "+1666"] } },
+      },
+      entry: {
+        sessionId: "sess-heartbeat-whatsapp-rejected",
+        updatedAt: 1,
+        lastChannel: "whatsapp",
+        lastTo: "+1222",
+      },
+    });
+
+    expect(resolved).toEqual({
+      channel: "none",
+      reason: "no-target",
+      accountId: undefined,
+      lastChannel: "whatsapp",
+      lastAccountId: undefined,
+    });
+  });
+
+  it.each([
+    {
+      name: "known account",
+      accountId: "work",
+      expected: {
+        channel: "telegram",
+        to: "-100123",
+        accountId: "work",
+        lastChannel: undefined,
+        lastAccountId: undefined,
+      },
+    },
+    {
+      name: "missing account",
+      accountId: "missing",
+      expected: {
+        channel: "none",
+        reason: "unknown-account",
+        accountId: "missing",
+        lastChannel: undefined,
+        lastAccountId: undefined,
+      },
+    },
+  ] as const)(
+    "handles explicit heartbeat accountId allow/deny: $name",
+    ({ accountId, expected }) => {
+      setActivePluginRegistry(
+        createTargetsTestRegistry([
+          createNoopOutboundChannelPlugin("discord"),
+          createNoopOutboundChannelPlugin("imessage"),
+          createNoopOutboundChannelPlugin("slack"),
+          createWhatsAppTestPlugin(),
+          createAccountAwareTelegramPlugin(),
+        ]),
+      );
+
+      const resolved = resolveHeartbeatDeliveryTarget({
+        cfg: {
+          agents: {
+            defaults: {
+              heartbeat: { target: "telegram", to: "-100123", accountId },
+            },
+          },
+          channels: {
+            telegram: {
+              accounts: {
+                work: { botToken: "token" },
+              },
+            },
+          },
+        },
+      });
+
+      expect(resolved).toEqual(expected);
+    },
+  );
+
+  it("prefers per-agent heartbeat overrides when provided", () => {
+    const resolved = resolveHeartbeatDeliveryTarget({
+      cfg: {
+        agents: {
+          defaults: {
+            heartbeat: { target: "telegram", to: "-100123" },
+          },
+        },
+      },
+      entry: {
+        sessionId: "sess-heartbeat-agent-override",
+        updatedAt: 1,
+        lastChannel: "whatsapp",
+        lastTo: "+1999",
+      },
+      heartbeat: {
+        target: "whatsapp",
+        to: "120363401234567890@g.us",
+      },
+    });
+
+    expect(resolved).toEqual({
+      channel: "whatsapp",
+      to: "120363401234567890@g.us",
+      accountId: undefined,
+      lastChannel: "whatsapp",
+      lastAccountId: undefined,
+    });
+  });
+
   it("prefers turn-scoped routing over mutable session routing for target=last", () => {
     const resolved = resolveHeartbeatDeliveryTarget({
       cfg: {},
@@ -902,5 +1075,48 @@ describe("resolveSessionDeliveryTarget — cross-channel reply guard (#24152)", 
 
     expect(resolved.channel).toBe("telegram");
     expect(resolved.to).toBe("+15550000000");
+  });
+});
+
+describe("resolveHeartbeatSenderContext", () => {
+  it("prefers delivery accountId for allowFrom resolution", () => {
+    setActivePluginRegistry(
+      createTargetsTestRegistry([
+        createNoopOutboundChannelPlugin("discord"),
+        createNoopOutboundChannelPlugin("imessage"),
+        createNoopOutboundChannelPlugin("slack"),
+        createWhatsAppTestPlugin(),
+        createAccountAwareTelegramPlugin(),
+      ]),
+    );
+
+    const ctx = resolveHeartbeatSenderContext({
+      cfg: {
+        channels: {
+          telegram: {
+            allowFrom: ["111"],
+            accounts: {
+              work: { allowFrom: ["222"], botToken: "token" },
+            },
+          },
+        },
+      },
+      entry: {
+        sessionId: "sid",
+        updatedAt: 1,
+        lastChannel: "telegram",
+        lastTo: "111",
+        lastAccountId: "default",
+      },
+      delivery: {
+        channel: "telegram",
+        to: "999",
+        accountId: "work",
+        lastChannel: "telegram",
+        lastAccountId: "default",
+      },
+    });
+
+    expect(ctx.allowFrom).toEqual(["222"]);
   });
 });

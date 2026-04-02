@@ -44,7 +44,9 @@ function normalizeWhatsAppTargetForTest(raw: string): string | null {
   return /^\+\d{7,15}$/u.test(normalized) ? normalized : null;
 }
 
-function createWhatsAppResolveTarget(label = "WhatsApp"): ChannelOutboundAdapter["resolveTarget"] {
+export function createWhatsAppResolveTargetForTest(
+  label = "WhatsApp",
+): ChannelOutboundAdapter["resolveTarget"] {
   return ({ to }) => {
     const normalized = to ? normalizeWhatsAppTargetForTest(to) : null;
     if (!normalized) {
@@ -147,7 +149,7 @@ export function createWhatsAppTestPlugin(): ChannelPlugin {
     outbound: {
       deliveryMode: "direct",
       sendText: async () => ({ channel: "whatsapp", messageId: "whatsapp-msg" }),
-      resolveTarget: createWhatsAppResolveTarget(),
+      resolveTarget: createWhatsAppResolveTargetForTest(),
     },
     messaging: whatsappMessagingForTest,
     resolveDefaultTo: ({ cfg }) =>

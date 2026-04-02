@@ -6,14 +6,12 @@ import { HEARTBEAT_PROMPT } from "../auto-reply/heartbeat.js";
 import type { ChannelOutboundAdapter } from "../channels/plugins/types.js";
 import type { OpenClawConfig } from "../config/config.js";
 import {
-  resolveAgentIdFromSessionKey,
   resolveAgentMainSessionKey,
   resolveMainSessionKey,
-  resolveStorePath,
-} from "../config/sessions.js";
-import { resolveWhatsAppOutboundTarget } from "../plugin-sdk/whatsapp-surface.js";
+} from "../config/sessions/main-session.js";
+import { resolveStorePath } from "../config/sessions/paths.js";
 import { getActivePluginRegistry, setActivePluginRegistry } from "../plugins/runtime.js";
-import { buildAgentPeerSessionKey } from "../routing/session-key.js";
+import { buildAgentPeerSessionKey, resolveAgentIdFromSessionKey } from "../routing/session-key.js";
 import { createOutboundTestPlugin, createTestRegistry } from "../test-utils/channel-plugins.js";
 import { typedCases } from "../test-utils/typed-cases.js";
 import {
@@ -24,26 +22,14 @@ import {
   runHeartbeatOnce,
 } from "./heartbeat-runner.js";
 import {
-  resolveHeartbeatDeliveryTarget,
-  resolveHeartbeatSenderContext,
-} from "./outbound/targets.js";
-import { telegramMessagingForTest } from "./outbound/targets.test-helpers.js";
+  createWhatsAppResolveTargetForTest,
+  telegramMessagingForTest,
+} from "./outbound/targets.test-helpers.js";
 import { enqueueSystemEvent, resetSystemEventsForTest } from "./system-events.js";
-
-let previousRegistry: ReturnType<typeof getActivePluginRegistry> | null = null;
-let testRegistry: ReturnType<typeof getActivePluginRegistry> | null = null;
-
-let fixtureRoot = "";
-let fixtureCount = 0;
 
 const heartbeatWhatsAppOutbound: ChannelOutboundAdapter = {
   deliveryMode: "direct",
-  resolveTarget: ({ to, allowFrom, mode }) =>
-    resolveWhatsAppOutboundTarget({
-      to,
-      allowFrom,
-      mode,
-    }),
+  resolveTarget: createWhatsAppResolveTargetForTest(),
   sendText: async ({ to, text, deps, accountId }) => {
     if (!deps?.["whatsapp"]) {
       throw new Error("sendWhatsApp missing");
@@ -66,91 +52,6 @@ const heartbeatWhatsAppOutbound: ChannelOutboundAdapter = {
     return { channel: "whatsapp", messageId: res.messageId, toJid: res.toJid };
   },
 };
-
-const createCaseDir = async (prefix: string) => {
-  const dir = path.join(fixtureRoot, `${prefix}-${fixtureCount++}`);
-  await fs.mkdir(dir, { recursive: true });
-  return dir;
-};
-
-beforeAll(async () => {
-  previousRegistry = getActivePluginRegistry();
-
-  const whatsappPlugin = createOutboundTestPlugin({
-    id: "whatsapp",
-    outbound: heartbeatWhatsAppOutbound,
-  });
-  whatsappPlugin.config = {
-    ...whatsappPlugin.config,
-    resolveAllowFrom: ({ cfg }) =>
-      cfg.channels?.whatsapp?.allowFrom?.map((entry) => String(entry)) ?? [],
-  };
-
-  const telegramPlugin = createOutboundTestPlugin({
-    id: "telegram",
-    outbound: {
-      deliveryMode: "direct",
-      sendText: async ({ to, text, deps, accountId }) => {
-        if (!deps?.["telegram"]) {
-          throw new Error("sendTelegram missing");
-        }
-        const res = await (deps["telegram"] as Function)(to, text, {
-          verbose: false,
-          accountId: accountId ?? undefined,
-        });
-        return { channel: "telegram", messageId: res.messageId, chatId: res.chatId };
-      },
-      sendMedia: async ({ to, text, mediaUrl, deps, accountId }) => {
-        if (!deps?.["telegram"]) {
-          throw new Error("sendTelegram missing");
-        }
-        const res = await (deps["telegram"] as Function)(to, text, {
-          verbose: false,
-          accountId: accountId ?? undefined,
-          mediaUrl,
-        });
-        return { channel: "telegram", messageId: res.messageId, chatId: res.chatId };
-      },
-    },
-    messaging: telegramMessagingForTest,
-  });
-  telegramPlugin.config = {
-    ...telegramPlugin.config,
-    listAccountIds: (cfg) => Object.keys(cfg.channels?.telegram?.accounts ?? {}),
-    resolveAllowFrom: ({ cfg, accountId }) => {
-      const channel = cfg.channels?.telegram;
-      const normalized = accountId?.trim();
-      if (normalized && channel?.accounts?.[normalized]?.allowFrom) {
-        return channel.accounts[normalized].allowFrom?.map((entry) => String(entry)) ?? [];
-      }
-      return channel?.allowFrom?.map((entry) => String(entry)) ?? [];
-    },
-  };
-
-  testRegistry = createTestRegistry([
-    { pluginId: "whatsapp", plugin: whatsappPlugin, source: "test" },
-    { pluginId: "telegram", plugin: telegramPlugin, source: "test" },
-  ]);
-  setActivePluginRegistry(testRegistry);
-
-  fixtureRoot = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-heartbeat-suite-"));
-});
-
-beforeEach(() => {
-  resetSystemEventsForTest();
-  if (testRegistry) {
-    setActivePluginRegistry(testRegistry);
-  }
-});
-
-afterAll(async () => {
-  if (fixtureRoot) {
-    await fs.rm(fixtureRoot, { recursive: true, force: true });
-  }
-  if (previousRegistry) {
-    setActivePluginRegistry(previousRegistry);
-  }
-});
 
 describe("resolveHeartbeatIntervalMs", () => {
   it("returns default when unset", () => {
@@ -238,264 +139,97 @@ describe("isHeartbeatEnabledForAgent", () => {
   });
 });
 
-describe("resolveHeartbeatDeliveryTarget", () => {
-  const baseEntry = {
-    sessionId: "sid",
-    updatedAt: Date.now(),
+describe("runHeartbeatOnce", () => {
+  let previousRegistry: ReturnType<typeof getActivePluginRegistry> | null = null;
+  let testRegistry: ReturnType<typeof getActivePluginRegistry> | null = null;
+  let fixtureRoot = "";
+  let fixtureCount = 0;
+
+  const createCaseDir = async (prefix: string) => {
+    const dir = path.join(fixtureRoot, `${prefix}-${fixtureCount++}`);
+    await fs.mkdir(dir, { recursive: true });
+    return dir;
   };
 
-  it("resolves target variants across route and allowlist rules", () => {
-    const cases: Array<{
-      name: string;
-      cfg: OpenClawConfig;
-      entry: typeof baseEntry & {
-        lastChannel?: "whatsapp" | "telegram" | "webchat";
-        lastTo?: string;
-      };
-      expected: ReturnType<typeof resolveHeartbeatDeliveryTarget>;
-    }> = [
-      {
-        name: "target none",
-        cfg: { agents: { defaults: { heartbeat: { target: "none" } } } },
-        entry: baseEntry,
-        expected: {
-          channel: "none",
-          reason: "target-none",
-          accountId: undefined,
-          lastChannel: undefined,
-          lastAccountId: undefined,
+  beforeAll(async () => {
+    previousRegistry = getActivePluginRegistry();
+
+    const whatsappPlugin = createOutboundTestPlugin({
+      id: "whatsapp",
+      outbound: heartbeatWhatsAppOutbound,
+    });
+    whatsappPlugin.config = {
+      ...whatsappPlugin.config,
+      resolveAllowFrom: ({ cfg }) =>
+        cfg.channels?.whatsapp?.allowFrom?.map((entry) => String(entry)) ?? [],
+    };
+
+    const telegramPlugin = createOutboundTestPlugin({
+      id: "telegram",
+      outbound: {
+        deliveryMode: "direct",
+        sendText: async ({ to, text, deps, accountId }) => {
+          if (!deps?.["telegram"]) {
+            throw new Error("sendTelegram missing");
+          }
+          const res = await (deps["telegram"] as Function)(to, text, {
+            verbose: false,
+            accountId: accountId ?? undefined,
+          });
+          return { channel: "telegram", messageId: res.messageId, chatId: res.chatId };
+        },
+        sendMedia: async ({ to, text, mediaUrl, deps, accountId }) => {
+          if (!deps?.["telegram"]) {
+            throw new Error("sendTelegram missing");
+          }
+          const res = await (deps["telegram"] as Function)(to, text, {
+            verbose: false,
+            accountId: accountId ?? undefined,
+            mediaUrl,
+          });
+          return { channel: "telegram", messageId: res.messageId, chatId: res.chatId };
         },
       },
-      {
-        name: "target defaults to none when unset",
-        cfg: {},
-        entry: { ...baseEntry, lastChannel: "whatsapp", lastTo: "120363401234567890@g.us" },
-        expected: {
-          channel: "none",
-          reason: "target-none",
-          accountId: undefined,
-          lastChannel: "whatsapp",
-          lastAccountId: undefined,
-        },
+      messaging: telegramMessagingForTest,
+    });
+    telegramPlugin.config = {
+      ...telegramPlugin.config,
+      listAccountIds: (cfg) => Object.keys(cfg.channels?.telegram?.accounts ?? {}),
+      resolveAllowFrom: ({ cfg, accountId }) => {
+        const channel = cfg.channels?.telegram;
+        const normalized = accountId?.trim();
+        if (normalized && channel?.accounts?.[normalized]?.allowFrom) {
+          return channel.accounts[normalized].allowFrom?.map((entry) => String(entry)) ?? [];
+        }
+        return channel?.allowFrom?.map((entry) => String(entry)) ?? [];
       },
-      {
-        name: "normalize explicit whatsapp target when allowFrom wildcard",
-        cfg: {
-          agents: {
-            defaults: { heartbeat: { target: "whatsapp", to: "whatsapp:120363401234567890@G.US" } },
-          },
-          channels: { whatsapp: { allowFrom: ["*"] } },
-        },
-        entry: baseEntry,
-        expected: {
-          channel: "whatsapp",
-          to: "120363401234567890@g.us",
-          accountId: undefined,
-          lastChannel: undefined,
-          lastAccountId: undefined,
-        },
-      },
-      {
-        name: "skip webchat last route",
-        cfg: {},
-        entry: { ...baseEntry, lastChannel: "webchat", lastTo: "web" },
-        expected: {
-          channel: "none",
-          reason: "target-none",
-          accountId: undefined,
-          lastChannel: undefined,
-          lastAccountId: undefined,
-        },
-      },
-      {
-        name: "reject explicit whatsapp target outside allowFrom",
-        cfg: {
-          agents: { defaults: { heartbeat: { target: "whatsapp", to: "+1999" } } },
-          channels: { whatsapp: { allowFrom: ["120363401234567890@g.us", "+1666"] } },
-        },
-        entry: { ...baseEntry, lastChannel: "whatsapp", lastTo: "+1222" },
-        expected: {
-          channel: "none",
-          reason: "no-target",
-          accountId: undefined,
-          lastChannel: "whatsapp",
-          lastAccountId: undefined,
-        },
-      },
-      {
-        name: "normalize prefixed whatsapp group targets",
-        cfg: {
-          agents: { defaults: { heartbeat: { target: "last" } } },
-          channels: { whatsapp: { allowFrom: ["120363401234567890@g.us"] } },
-        },
-        entry: {
-          ...baseEntry,
-          lastChannel: "whatsapp",
-          lastTo: "whatsapp:120363401234567890@G.US",
-        },
-        expected: {
-          channel: "whatsapp",
-          to: "120363401234567890@g.us",
-          accountId: undefined,
-          lastChannel: "whatsapp",
-          lastAccountId: undefined,
-        },
-      },
-      {
-        name: "keep explicit telegram target",
-        cfg: { agents: { defaults: { heartbeat: { target: "telegram", to: "-100123" } } } },
-        entry: baseEntry,
-        expected: {
-          channel: "telegram",
-          to: "-100123",
-          accountId: undefined,
-          lastChannel: undefined,
-          lastAccountId: undefined,
-        },
-      },
-      {
-        name: "allow direct target by default",
-        cfg: { agents: { defaults: { heartbeat: { target: "last" } } } },
-        entry: { ...baseEntry, lastChannel: "telegram", lastTo: "5232990709" },
-        expected: {
-          channel: "telegram",
-          to: "5232990709",
-          accountId: undefined,
-          lastChannel: "telegram",
-          lastAccountId: undefined,
-        },
-      },
-      {
-        name: "block direct target when directPolicy is block",
-        cfg: { agents: { defaults: { heartbeat: { target: "last", directPolicy: "block" } } } },
-        entry: { ...baseEntry, lastChannel: "telegram", lastTo: "5232990709" },
-        expected: {
-          channel: "none",
-          reason: "dm-blocked",
-          accountId: undefined,
-          lastChannel: "telegram",
-          lastAccountId: undefined,
-        },
-      },
-    ];
-    for (const { cfg, entry, name, expected } of cases) {
-      expect(resolveHeartbeatDeliveryTarget({ cfg, entry }), name).toEqual(expected);
+    };
+
+    testRegistry = createTestRegistry([
+      { pluginId: "whatsapp", plugin: whatsappPlugin, source: "test" },
+      { pluginId: "telegram", plugin: telegramPlugin, source: "test" },
+    ]);
+    setActivePluginRegistry(testRegistry);
+
+    fixtureRoot = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-heartbeat-suite-"));
+  });
+
+  beforeEach(() => {
+    resetSystemEventsForTest();
+    if (testRegistry) {
+      setActivePluginRegistry(testRegistry);
     }
   });
 
-  it.each([
-    { name: "topic suffix", to: "-100111:topic:42", expectedTo: "-100111", expectedThreadId: 42 },
-    { name: "plain chat id", to: "-100111", expectedTo: "-100111", expectedThreadId: undefined },
-  ])(
-    "parses optional telegram :topic: threadId suffix: $name",
-    ({ to, expectedTo, expectedThreadId }) => {
-      const cfg: OpenClawConfig = {
-        agents: {
-          defaults: {
-            heartbeat: { target: "telegram", to },
-          },
-        },
-      };
-      const result = resolveHeartbeatDeliveryTarget({ cfg, entry: baseEntry });
-      expect(result.channel).toBe("telegram");
-      expect(result.to).toBe(expectedTo);
-      expect(result.threadId).toBe(expectedThreadId);
-    },
-  );
-
-  it.each([
-    {
-      name: "known account",
-      accountId: "work",
-      expected: {
-        channel: "telegram",
-        to: "-100123",
-        accountId: "work",
-        lastChannel: undefined,
-        lastAccountId: undefined,
-      },
-    },
-    {
-      name: "missing account",
-      accountId: "missing",
-      expected: {
-        channel: "none",
-        reason: "unknown-account",
-        accountId: "missing",
-        lastChannel: undefined,
-        lastAccountId: undefined,
-      },
-    },
-  ] as const)(
-    "handles explicit heartbeat accountId allow/deny: $name",
-    ({ accountId, expected }) => {
-      const cfg: OpenClawConfig = {
-        agents: {
-          defaults: {
-            heartbeat: { target: "telegram", to: "-100123", accountId },
-          },
-        },
-        channels: { telegram: { accounts: { work: { botToken: "token" } } } },
-      };
-      expect(resolveHeartbeatDeliveryTarget({ cfg, entry: baseEntry })).toEqual(expected);
-    },
-  );
-
-  it("prefers per-agent heartbeat overrides when provided", () => {
-    const cfg: OpenClawConfig = {
-      agents: { defaults: { heartbeat: { target: "telegram", to: "-100123" } } },
-    };
-    const heartbeat = { target: "whatsapp", to: "120363401234567890@g.us" } as const;
-    expect(
-      resolveHeartbeatDeliveryTarget({
-        cfg,
-        entry: { ...baseEntry, lastChannel: "whatsapp", lastTo: "+1999" },
-        heartbeat,
-      }),
-    ).toEqual({
-      channel: "whatsapp",
-      to: "120363401234567890@g.us",
-      accountId: undefined,
-      lastChannel: "whatsapp",
-      lastAccountId: undefined,
-    });
+  afterAll(async () => {
+    if (fixtureRoot) {
+      await fs.rm(fixtureRoot, { recursive: true, force: true });
+    }
+    if (previousRegistry) {
+      setActivePluginRegistry(previousRegistry);
+    }
   });
-});
 
-describe("resolveHeartbeatSenderContext", () => {
-  it("prefers delivery accountId for allowFrom resolution", () => {
-    const cfg: OpenClawConfig = {
-      channels: {
-        telegram: {
-          allowFrom: ["111"],
-          accounts: {
-            work: { allowFrom: ["222"], botToken: "token" },
-          },
-        },
-      },
-    };
-    const entry = {
-      sessionId: "sid",
-      updatedAt: Date.now(),
-      lastChannel: "telegram" as const,
-      lastTo: "111",
-      lastAccountId: "default",
-    };
-    const delivery = {
-      channel: "telegram" as const,
-      to: "999",
-      accountId: "work",
-      lastChannel: "telegram" as const,
-      lastAccountId: "default",
-    };
-
-    const ctx = resolveHeartbeatSenderContext({ cfg, entry, delivery });
-
-    expect(ctx.allowFrom).toEqual(["222"]);
-  });
-});
-
-describe("runHeartbeatOnce", () => {
   const createHeartbeatDeps = (
     sendWhatsApp: (
       to: string,
