@@ -332,6 +332,13 @@ function buildAuthStoreForTarget(entry: SecretRegistryEntry, envId: string): Aut
   };
 }
 
+function resolveOpenClawTargetEnvId(entry: SecretRegistryEntry, index: number): string {
+  if (entry.id === "plugins.entries.firecrawl.config.webFetch.apiKey") {
+    return "FIRECRAWL_API_KEY";
+  }
+  return `OPENCLAW_SECRET_TARGET_${index}`;
+}
+
 describe("secrets runtime target coverage", () => {
   beforeAll(async () => {
     ({ clearSecretsRuntimeSnapshot, prepareSecretsRuntimeSnapshot } = await import("./runtime.js"));
@@ -354,12 +361,11 @@ describe("secrets runtime target coverage", () => {
       (entry) => entry.configFile === "openclaw.json",
     );
     for (const [index, entry] of entries.entries()) {
-      const envId = `OPENCLAW_SECRET_TARGET_${index}`;
-      const runtimeEnvId = resolveCoverageEnvId(entry, envId);
+      const envId = resolveOpenClawTargetEnvId(entry, index);
       const expectedValue = `resolved-${entry.id}`;
       const snapshot = await prepareSecretsRuntimeSnapshot({
         config: buildConfigForOpenClawTarget(entry, envId),
-        env: { [runtimeEnvId]: expectedValue },
+        env: { [envId]: expectedValue },
         agentDirs: ["/tmp/openclaw-agent-main"],
         loadAuthStore: () => ({ version: 1, profiles: {} }),
       });

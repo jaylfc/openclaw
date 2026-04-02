@@ -1214,24 +1214,19 @@ describe("secrets runtime snapshot", () => {
       provider: "default",
       id: "DISABLED_TELEGRAM_BASE_TOKEN",
     });
-    const ignoredInactiveWarnings = snapshot.warnings.filter(
-      (warning) => warning.code === "SECRETS_REF_IGNORED_INACTIVE_SURFACE",
-    );
-    expect(ignoredInactiveWarnings).toHaveLength(10);
-    expect(snapshot.warnings.map((warning) => warning.path)).toEqual(
-      expect.arrayContaining([
-        "agents.defaults.memorySearch.remote.apiKey",
-        "gateway.auth.password",
-        "channels.telegram.botToken",
-        "channels.telegram.accounts.disabled.botToken",
-        "plugins.entries.brave.config.webSearch.apiKey",
-        "plugins.entries.google.config.webSearch.apiKey",
-        "plugins.entries.xai.config.webSearch.apiKey",
-        "plugins.entries.moonshot.config.webSearch.apiKey",
-        "plugins.entries.perplexity.config.webSearch.apiKey",
-        "plugins.entries.firecrawl.config.webSearch.apiKey",
-      ]),
-    );
+    const inactivePaths = snapshot.warnings
+      .filter((warning) => warning.code === "SECRETS_REF_IGNORED_INACTIVE_SURFACE")
+      .map((warning) => warning.path)
+      .toSorted();
+    const expectedInactivePaths = [
+      ...buildTestWebSearchProviders().map((provider) => provider.credentialPath),
+      "agents.defaults.memorySearch.remote.apiKey",
+      "gateway.auth.password",
+      "channels.telegram.botToken",
+      "channels.telegram.accounts.disabled.botToken",
+    ].toSorted();
+    expect(inactivePaths).toHaveLength(expectedInactivePaths.length);
+    expect(inactivePaths).toEqual(expectedInactivePaths);
   });
 
   it("treats gateway.remote refs as inactive when local auth credentials are configured", async () => {
