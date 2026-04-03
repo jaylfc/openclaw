@@ -483,9 +483,18 @@ export function formatLogTimestamp(
   }
 
   if (mode === "pretty") {
-    return formatTimestamp(parsed, { style: "short", timeZone: localTime ? undefined : "UTC" });
+    if (!localTime) {
+      const match =
+        /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})(?:\.\d+)?(Z|[+-]\d{2}:\d{2})$/.exec(value);
+      if (match) {
+        const [, , time, offsetRaw] = match;
+        return `${time}${offsetRaw === "Z" ? "+00:00" : offsetRaw}`;
+      }
+      return value;
+    }
+    return formatTimestamp(parsed, { style: "short" });
   }
-  return localTime ? formatTimestamp(parsed, { style: "long" }) : parsed.toISOString();
+  return localTime ? formatTimestamp(parsed, { style: "long" }) : value;
 }
 
 function formatLogLine(
