@@ -161,7 +161,7 @@ async function createFollowLogsClient(opts: LogsCliOptions): Promise<{
 
   let connected = false;
   let ready = createDeferred<void>();
-  let methods = new Set<string>();
+  const methods = new Set<string>();
   const streamQueue = createAsyncQueue<LogsTailPayload>();
 
   const resetReady = () => {
@@ -172,7 +172,10 @@ async function createFollowLogsClient(opts: LogsCliOptions): Promise<{
     ...clientOptions,
     onHelloOk: (hello) => {
       connected = true;
-      methods = new Set(Array.isArray(hello.features?.methods) ? hello.features.methods : []);
+      methods.clear();
+      for (const method of Array.isArray(hello.features?.methods) ? hello.features.methods : []) {
+        methods.add(method);
+      }
       streamQueue.reset();
       ready.resolve();
     },
@@ -247,6 +250,44 @@ async function createFollowLogsClient(opts: LogsCliOptions): Promise<{
     },
     nextStreamPayload: async () => await streamQueue.next(),
   };
+}
+
+function supportsStreamingFollow(methods: ReadonlySet<string>): boolean {
+  return methods.has("logs.subscribe") && methods.has("logs.unsubscribe");
+}
+
+async function waitForFollowClientReconnect(params: {
+  followClient: {
+    waitUntilReady: () => Promise<void>;
+  };
+  opts: LogsCliOptions;
+  rich: boolean;
+  jsonMode: boolean;
+  retryMs: number;
+  emitJsonLine: (payload: Record<string, unknown>, toStdErr?: boolean) => boolean;
+  errorLine: (text: string) => boolean;
+}): Promise<void> {
+  for (;;) {
+    try {
+      await params.followClient.waitUntilReady();
+      return;
+    } catch (err) {
+      if (!isRetryableFollowStartupError(err)) {
+        throw err;
+      }
+      emitFollowStartupRetryNotice({
+        err,
+        opts: params.opts,
+        firstFailure: false,
+        rich: params.rich,
+        jsonMode: params.jsonMode,
+        retryMs: params.retryMs,
+        emitJsonLine: params.emitJsonLine,
+        errorLine: params.errorLine,
+      });
+      await delay(params.retryMs);
+    }
+  }
 }
 
 function isRetryableFollowStartupError(err: unknown): boolean {
@@ -374,6 +415,11 @@ async function connectFollowLogsClientWithRetry(params: {
     }
   }
 }
+
+export const __testing = {
+  supportsStreamingFollow,
+  waitForFollowClientReconnect,
+};
 
 function emitLogsPayload(params: {
   payload: LogsTailPayload;
@@ -646,14 +692,10 @@ export function registerLogsCli(program: Command) {
           errorLine,
         })
       : null;
-    const supportsStreamingFollow =
-      followClient &&
-      followClient.methods.has("logs.subscribe") &&
-      followClient.methods.has("logs.unsubscribe");
 
     try {
-      if (supportsStreamingFollow) {
-        while (true) {
+      while (true) {
+        if (followClient && supportsStreamingFollow(followClient.methods)) {
           try {
             const payload = await followClient.subscribeToStream(currentFile, cursor);
             if (
@@ -722,7 +764,15 @@ export function registerLogsCli(program: Command) {
                 errorLine,
               });
               await delay(FOLLOW_CONNECT_RETRY_INTERVAL_MS);
-              await followClient.waitUntilReady().catch(() => {});
+              await waitForFollowClientReconnect({
+                followClient,
+                opts,
+                rich,
+                jsonMode,
+                retryMs: FOLLOW_CONNECT_RETRY_INTERVAL_MS,
+                emitJsonLine,
+                errorLine,
+              });
               continue;
             }
             emitGatewayError(err, opts, jsonMode ? "json" : "text", rich, emitJsonLine, errorLine);
@@ -730,9 +780,7 @@ export function registerLogsCli(program: Command) {
             return;
           }
         }
-      }
 
-      while (true) {
         let payload: LogsTailPayload;
         // Show progress spinner only on first fetch, not during follow polling
         const showProgress = first && !opts.follow;
@@ -794,8 +842,10 @@ export function registerLogsCli(program: Command) {
       }
     } finally {
       if (followClient) {
-        if (supportsStreamingFollow) {
-          await Promise.resolve(followClient.client.request("logs.unsubscribe")).catch(() => {});
+        if (supportsStreamingFollow(followClient.methods)) {
+          await Promise.resolve()
+            .then(async () => await followClient.client.request("logs.unsubscribe"))
+            .catch(() => {});
         }
         await followClient.client.stopAndWait().catch(() => {
           followClient.client.stop();
