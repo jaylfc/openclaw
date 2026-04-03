@@ -304,6 +304,41 @@ function resolveConfiguredProviderConfig(
   return resolveModelsJsonProviderConfig(provider, agentDir);
 }
 
+// ---------------------------------------------------------------------------
+// models.json provider config fallback
+// ---------------------------------------------------------------------------
+
+/**
+ * Cached parsed providers from models.json, keyed by resolved agent dir.
+ * Avoids repeated synchronous disk reads when resolveConfiguredProviderConfig
+ * is called multiple times within a single model resolution pass.
+ */
+const modelsJsonProvidersCache = new Map<string, Record<string, unknown> | null>();
+
+/** Exported for testing only — clears the models.json provider cache. */
+export function clearModelsJsonProvidersCacheForTest(): void {
+  modelsJsonProvidersCache.clear();
+}
+
+function loadModelsJsonProviders(agentDir?: string): Record<string, unknown> | null {
+  const resolvedAgentDir = agentDir ?? resolveOpenClawAgentDir();
+  const cached = modelsJsonProvidersCache.get(resolvedAgentDir);
+  if (cached !== undefined) {
+    return cached;
+  }
+  const modelsJsonPath = path.join(resolvedAgentDir, "models.json");
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(fs.readFileSync(modelsJsonPath, "utf8")) as unknown;
+  } catch {
+    modelsJsonProvidersCache.set(resolvedAgentDir, null);
+    return null;
+  }
+  const result = isRecord(parsed) && isRecord(parsed.providers) ? parsed.providers : null;
+  modelsJsonProvidersCache.set(resolvedAgentDir, result);
+  return result;
+}
+
 /**
  * Read provider config from the generated models.json file.
  * This covers providers that were discovered via implicit provider resolution
@@ -314,18 +349,10 @@ function resolveModelsJsonProviderConfig(
   provider: string,
   agentDir?: string,
 ): InlineProviderConfig | undefined {
-  const resolvedAgentDir = agentDir ?? resolveOpenClawAgentDir();
-  const modelsJsonPath = path.join(resolvedAgentDir, "models.json");
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(fs.readFileSync(modelsJsonPath, "utf8")) as unknown;
-  } catch {
+  const providers = loadModelsJsonProviders(agentDir);
+  if (!providers) {
     return undefined;
   }
-  if (!isRecord(parsed) || !isRecord(parsed.providers)) {
-    return undefined;
-  }
-  const providers = parsed.providers;
   const exact = providers[provider];
   if (isRecord(exact)) {
     return exact as unknown as InlineProviderConfig;
@@ -337,6 +364,29 @@ function resolveModelsJsonProviderConfig(
     }
   }
   return undefined;
+}
+
+/**
+ * Merge user-config providers with models.json providers so that inline model
+ * lookups can also find entries from implicitly discovered providers.
+ */
+function mergedProviders(
+  cfg: OpenClawConfig | undefined,
+  agentDir?: string,
+): Record<string, InlineProviderConfig> {
+  const userProviders = (cfg?.models?.providers ?? {}) as Record<string, InlineProviderConfig>;
+  const modelsJsonProviders = loadModelsJsonProviders(agentDir);
+  if (!modelsJsonProviders) {
+    return userProviders;
+  }
+  // User config takes precedence; models.json fills in missing providers.
+  const merged: Record<string, InlineProviderConfig> = { ...userProviders };
+  for (const [key, value] of Object.entries(modelsJsonProviders)) {
+    if (!merged[key] && isRecord(value)) {
+      merged[key] = value as unknown as InlineProviderConfig;
+    }
+  }
+  return merged;
 }
 
 function applyConfiguredProviderOverrides(params: {
@@ -484,7 +534,7 @@ function resolveExplicitModelWithRegistry(params: {
   }
   const providerConfig = resolveConfiguredProviderConfig(cfg, provider, agentDir);
   const inlineMatch = findInlineModelMatch({
-    providers: cfg?.models?.providers ?? {},
+    providers: mergedProviders(cfg, agentDir),
     provider,
     modelId,
   });
@@ -522,7 +572,7 @@ function resolveExplicitModelWithRegistry(params: {
     };
   }
 
-  const providers = cfg?.models?.providers ?? {};
+  const providers = mergedProviders(cfg, agentDir);
   const fallbackInlineMatch = findInlineModelMatch({
     providers,
     provider,
