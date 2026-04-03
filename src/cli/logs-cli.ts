@@ -129,10 +129,14 @@ async function fetchLogsWithClient(
   opts: LogsCliOptions,
   file: string | undefined,
   cursor: number | undefined,
+  includeFile: boolean,
 ): Promise<LogsTailPayload> {
   const limit = parsePositiveInt(opts.limit, 200);
   const maxBytes = parsePositiveInt(opts.maxBytes, 250_000);
-  const payload = await client.request("logs.tail", { file, cursor, limit, maxBytes });
+  const payload = await client.request(
+    "logs.tail",
+    includeFile ? { file, cursor, limit, maxBytes } : { cursor, limit, maxBytes },
+  );
   if (!payload || typeof payload !== "object") {
     throw new Error("Unexpected logs.tail response");
   }
@@ -165,6 +169,7 @@ async function createFollowLogsClient(opts: LogsCliOptions): Promise<{
   const streamQueue = createAsyncQueue<LogsTailPayload>();
 
   const resetReady = () => {
+    void ready.promise.catch(() => {});
     ready = createDeferred<void>();
   };
 
@@ -198,10 +203,20 @@ async function createFollowLogsClient(opts: LogsCliOptions): Promise<{
         reset: payload?.reset,
       });
     },
-    onClose: () => {
+    onClose: (code, reason) => {
+      const wasConnected = connected;
       connected = false;
-      resetReady();
-      streamQueue.fail(new Error("gateway log stream disconnected"));
+      const closeError = new Error(
+        reason ? `gateway closed (${code}): ${reason}` : `gateway closed (${code})`,
+      ) as Error & { followRetryable?: boolean };
+      closeError.followRetryable = code !== 1008;
+      ready.reject(closeError);
+      if (wasConnected) {
+        resetReady();
+        streamQueue.fail(new Error("gateway log stream disconnected"));
+        return;
+      }
+      streamQueue.fail(closeError);
     },
   });
 
@@ -304,6 +319,12 @@ async function waitForFollowClientReconnect(params: {
 }
 
 function isRetryableFollowStartupError(err: unknown): boolean {
+  if (err && typeof err === "object" && "followRetryable" in err) {
+    const retryable = (err as { followRetryable?: unknown }).followRetryable;
+    if (typeof retryable === "boolean") {
+      return retryable;
+    }
+  }
   const message = (err instanceof Error ? err.message : String(err)).toLowerCase();
   return (
     message.includes("connect failed") ||
@@ -319,6 +340,7 @@ function isRetryableFollowStartupError(err: unknown): boolean {
     message.includes("abnormal closure") ||
     message.includes("gateway closed") ||
     message.includes("gateway log stream disconnected") ||
+    message.includes("gateway not connected") ||
     message.includes("gateway client stopped")
   );
 }
@@ -403,7 +425,7 @@ async function connectFollowLogsClientWithRetry(params: {
 }): Promise<{
   client: GatewayClient;
   methods: Set<string>;
-  waitUntilReady: () => Promise<void>;
+  waitUntilReady: (opts?: { timeoutMs?: number; keepAlive?: boolean }) => Promise<void>;
   subscribeToStream: (
     file: string | undefined,
     cursor: number | undefined,
@@ -437,6 +459,7 @@ async function connectFollowLogsClientWithRetry(params: {
 }
 
 export const __testing = {
+  isRetryableFollowStartupError,
   supportsStreamingFollow,
   waitForFollowClientReconnect,
 };
@@ -669,6 +692,11 @@ function emitGatewayError(
   if (!errorLine(details.message)) {
     return;
   }
+  if (errorText.trim()) {
+    if (!errorLine(colorize(rich, theme.muted, `Reason: ${summarizeRetryErrorText(err)}`))) {
+      return;
+    }
+  }
   errorLine(colorize(rich, theme.muted, hint));
 }
 
@@ -703,17 +731,18 @@ export function registerLogsCli(program: Command) {
     const rich = isRich() && opts.color !== false;
     const localTime =
       Boolean(opts.localTime) || (!!process.env.TZ && isValidTimeZone(process.env.TZ));
-    const followClient = opts.follow
-      ? await connectFollowLogsClientWithRetry({
+    let followClient: Awaited<ReturnType<typeof connectFollowLogsClientWithRetry>> | null = null;
+
+    try {
+      if (opts.follow) {
+        followClient = await connectFollowLogsClientWithRetry({
           opts,
           rich,
           jsonMode,
           emitJsonLine,
           errorLine,
-        })
-      : null;
-
-    try {
+        });
+      }
       while (true) {
         if (followClient && supportsStreamingFollow(followClient.methods)) {
           try {
@@ -807,7 +836,13 @@ export function registerLogsCli(program: Command) {
         try {
           if (followClient) {
             await followClient.waitUntilReady();
-            payload = await fetchLogsWithClient(followClient.client, opts, currentFile, cursor);
+            payload = await fetchLogsWithClient(
+              followClient.client,
+              opts,
+              currentFile,
+              cursor,
+              supportsStreamingFollow(followClient.methods),
+            );
           } else {
             payload = await fetchLogs(opts, currentFile, cursor, showProgress);
           }
@@ -860,6 +895,10 @@ export function registerLogsCli(program: Command) {
         }
         await delay(interval);
       }
+    } catch (err) {
+      emitGatewayError(err, opts, jsonMode ? "json" : "text", rich, emitJsonLine, errorLine);
+      process.exit(1);
+      return;
     } finally {
       if (followClient) {
         if (supportsStreamingFollow(followClient.methods)) {

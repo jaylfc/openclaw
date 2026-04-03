@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../config/config.js";
 import type { DeviceIdentity } from "../infra/device-identity.js";
 import { captureEnv } from "../test-utils/env.js";
+import { GATEWAY_CLIENT_MODES, GATEWAY_CLIENT_NAMES } from "../utils/message-channel.js";
 import {
   loadConfigMock as loadConfig,
   pickPrimaryLanIPv4Mock as pickPrimaryLanIPv4,
@@ -23,6 +24,9 @@ let lastClientOptions: {
   token?: string;
   password?: string;
   tlsFingerprint?: string;
+  requestTimeoutMs?: number;
+  clientName?: string;
+  mode?: string;
   scopes?: string[];
   deviceIdentity?: unknown;
   onHelloOk?: (hello: { features?: { methods?: string[] } }) => void | Promise<void>;
@@ -83,8 +87,14 @@ vi.mock("./client.js", () => ({
   },
 }));
 
-const { __testing, buildGatewayConnectionDetails, callGateway, callGatewayCli, callGatewayScoped } =
-  await import("./call.js");
+const {
+  __testing,
+  buildGatewayConnectionDetails,
+  callGateway,
+  callGatewayCli,
+  callGatewayLeastPrivilege,
+  callGatewayScoped,
+} = await import("./call.js");
 
 class StubGatewayClient {
   constructor(opts: {
@@ -424,6 +434,26 @@ describe("callGateway url resolution", () => {
     await callGatewayScoped({ method: "health", scopes: [] });
     expect(lastClientOptions?.scopes).toEqual([]);
   });
+
+  it("uses backend identity defaults for non-CLI wrappers", async () => {
+    setLocalLoopbackGatewayConfig();
+
+    await callGateway({ method: "health" });
+    expect(lastClientOptions?.clientName).toBe(GATEWAY_CLIENT_NAMES.GATEWAY_CLIENT);
+    expect(lastClientOptions?.mode).toBe(GATEWAY_CLIENT_MODES.BACKEND);
+
+    await callGatewayScoped({ method: "health", scopes: ["operator.read"] });
+    expect(lastClientOptions?.clientName).toBe(GATEWAY_CLIENT_NAMES.GATEWAY_CLIENT);
+    expect(lastClientOptions?.mode).toBe(GATEWAY_CLIENT_MODES.BACKEND);
+
+    await callGatewayLeastPrivilege({ method: "health" });
+    expect(lastClientOptions?.clientName).toBe(GATEWAY_CLIENT_NAMES.GATEWAY_CLIENT);
+    expect(lastClientOptions?.mode).toBe(GATEWAY_CLIENT_MODES.BACKEND);
+
+    await callGatewayCli({ method: "health" });
+    expect(lastClientOptions?.clientName).toBe(GATEWAY_CLIENT_NAMES.CLI);
+    expect(lastClientOptions?.mode).toBe(GATEWAY_CLIENT_MODES.CLI);
+  });
 });
 
 describe("buildGatewayConnectionDetails", () => {
@@ -535,6 +565,7 @@ describe("buildGatewayConnectionDetails", () => {
     resolveGatewayPort.mockReturnValue(18800);
     __testing.setDepsForTests({
       loadConfig: {} as never,
+      resolveGatewayPort: {} as never,
     });
 
     const details = buildGatewayConnectionDetails();
