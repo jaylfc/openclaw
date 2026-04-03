@@ -12,6 +12,7 @@ Docs: https://docs.openclaw.ai
 - Providers/config: add full `models.providers.*.request` transport overrides for model-provider paths, including headers, auth, proxy, and TLS, and keep media provider HTTP request transport overrides aligned with the same request-policy surface. Thanks @vincentkoc.
 - Control UI/skills: add ClawHub search, detail, and install flows directly in the Skills panel. (#60134) Thanks @samzong.
 - Outbound/runtime seams: split delivery, target-resolution, and session/transcript helper loading into narrower runtime seams so outbound hot paths and their owner tests avoid broader setup fan-out. (#60311) Thanks @shakkernerd.
+- Tests/runtime: trim local unit-test import/runtime fan-out across browser, WhatsApp, cron, task, and reply flows so owner suites start faster with lower shared-worker overhead while preserving the same focused behavior coverage. (#60249) Thanks @shakkernerd.
 
 ### Fixes
 
