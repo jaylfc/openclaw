@@ -325,7 +325,7 @@ describe("runCronIsolatedAgentTurn — skill filter", () => {
   });
 
   describe("context token fallback", () => {
-    it("preserves existing session contextTokens when no cached model window is loaded", async () => {
+    it("falls back to the default context window when no cached model window is loaded", async () => {
       const session = makeCronSession({
         sessionEntry: makeCronSessionEntry({
           contextTokens: 222_000,
@@ -337,7 +337,7 @@ describe("runCronIsolatedAgentTurn — skill filter", () => {
       const result = await runSkillFilterCase();
 
       expect(result.status).toBe("ok");
-      expect(session.sessionEntry.contextTokens).toBe(222_000);
+      expect(session.sessionEntry.contextTokens).toBe(128_000);
     });
 
     it("prefers cached model contextTokens over the previous session value", async () => {

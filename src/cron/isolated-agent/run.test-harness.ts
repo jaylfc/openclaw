@@ -58,12 +58,11 @@ const normalizeModelSelectionMock = vi.fn((value: unknown) =>
   typeof value === "string" ? value.trim() || undefined : undefined,
 );
 const lookupContextTokensMock = vi.fn().mockReturnValue(128000);
-const resolveCronStyleNowMock = vi
-  .fn()
-  .mockReturnValue({
-    formattedTime: "2026-02-10 12:00",
-    timeLine: "Current time: 2026-02-10 12:00 UTC",
-  });
+export const lookupCachedContextTokensMock = lookupContextTokensMock;
+const resolveCronStyleNowMock = vi.fn().mockReturnValue({
+  formattedTime: "2026-02-10 12:00",
+  timeLine: "Current time: 2026-02-10 12:00 UTC",
+});
 const resolveAgentTimeoutMsMock = vi.fn().mockReturnValue(60_000);
 const deriveSessionTotalTokensMock = vi.fn().mockReturnValue(30);
 const hasNonzeroUsageMock = vi.fn().mockReturnValue(false);
