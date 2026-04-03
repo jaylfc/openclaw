@@ -142,7 +142,7 @@ async function fetchLogsWithClient(
 async function createFollowLogsClient(opts: LogsCliOptions): Promise<{
   client: GatewayClient;
   methods: Set<string>;
-  waitUntilReady: () => Promise<void>;
+  waitUntilReady: (opts?: { timeoutMs?: number; keepAlive?: boolean }) => Promise<void>;
   subscribeToStream: (
     file: string | undefined,
     cursor: number | undefined,
@@ -205,19 +205,29 @@ async function createFollowLogsClient(opts: LogsCliOptions): Promise<{
     },
   });
 
-  const waitUntilReady = async () => {
+  const waitUntilReady = async (opts?: { timeoutMs?: number; keepAlive?: boolean }) => {
     if (connected) {
       return;
     }
+    const effectiveTimeoutMs =
+      typeof opts?.timeoutMs === "number" && Number.isFinite(opts.timeoutMs)
+        ? Math.max(1, Math.floor(opts.timeoutMs))
+        : timeoutMs;
     let timer: NodeJS.Timeout | null = null;
     try {
       await Promise.race([
         ready.promise,
         new Promise<never>((_, reject) => {
           timer = setTimeout(() => {
-            reject(new Error(`gateway timeout after ${timeoutMs}ms\n${connectionDetails.message}`));
-          }, timeoutMs);
-          timer.unref?.();
+            reject(
+              new Error(
+                `gateway timeout after ${effectiveTimeoutMs}ms\n${connectionDetails.message}`,
+              ),
+            );
+          }, effectiveTimeoutMs);
+          if (!opts?.keepAlive) {
+            timer.unref?.();
+          }
         }),
       ]);
     } finally {
@@ -258,7 +268,7 @@ function supportsStreamingFollow(methods: ReadonlySet<string>): boolean {
 
 async function waitForFollowClientReconnect(params: {
   followClient: {
-    waitUntilReady: () => Promise<void>;
+    waitUntilReady: (opts?: { timeoutMs?: number; keepAlive?: boolean }) => Promise<void>;
   };
   opts: LogsCliOptions;
   rich: boolean;
@@ -269,7 +279,10 @@ async function waitForFollowClientReconnect(params: {
 }): Promise<void> {
   for (;;) {
     try {
-      await params.followClient.waitUntilReady();
+      await params.followClient.waitUntilReady({
+        timeoutMs: params.retryMs,
+        keepAlive: true,
+      });
       return;
     } catch (err) {
       if (!isRetryableFollowStartupError(err)) {
@@ -305,12 +318,18 @@ function isRetryableFollowStartupError(err: unknown): boolean {
     message.includes("gateway timeout after") ||
     message.includes("abnormal closure") ||
     message.includes("gateway closed") ||
+    message.includes("gateway log stream disconnected") ||
     message.includes("gateway client stopped")
   );
 }
 
 function formatRetryDelayLabel(retryMs: number): string {
   return retryMs % 1000 === 0 ? `${retryMs / 1000}s` : `${retryMs}ms`;
+}
+
+function summarizeRetryErrorText(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err);
+  return message.split(/\r?\n/u, 1)[0]?.trim().replace(/\s+/gu, " ");
 }
 
 function emitFollowStartupRetryNotice(params: {
@@ -326,6 +345,7 @@ function emitFollowStartupRetryNotice(params: {
   const { err, opts, firstFailure, rich, jsonMode, retryMs, emitJsonLine, errorLine } = params;
   const details = buildGatewayConnectionDetails({ url: opts.url });
   const errorText = err instanceof Error ? err.message : String(err);
+  const retryErrorText = summarizeRetryErrorText(err);
   const delayLabel = formatRetryDelayLabel(retryMs);
 
   if (jsonMode) {
@@ -342,7 +362,7 @@ function emitFollowStartupRetryNotice(params: {
         : {
             type: "notice",
             message: "Still waiting for gateway before following logs.",
-            error: errorText,
+            error: retryErrorText,
             retryMs,
             retrying: true,
           },
@@ -369,7 +389,7 @@ function emitFollowStartupRetryNotice(params: {
     colorize(
       rich,
       theme.muted,
-      `Still waiting for gateway (${errorText}). Retrying in ${delayLabel}...`,
+      `Still waiting for gateway (${retryErrorText}). Retrying in ${delayLabel}...`,
     ),
   );
 }
