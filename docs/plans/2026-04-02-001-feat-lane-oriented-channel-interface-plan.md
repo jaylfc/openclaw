@@ -1,7 +1,7 @@
 ---
 title: feat: Add host-owned lane-oriented rich channel interface
 type: feat
-status: active
+status: completed
 date: 2026-04-02
 ---
 
@@ -28,6 +28,11 @@ The design should sit on top of the existing `DeliveryContext`,
 transport layer. Rich rendering and vendor-specific fallbacks should be owned by
 OpenClaw channel adapters, not by plugins such as
 `openclaw-codex-app-server`.
+
+Implementation note: completed on `codex/host-owned-channel-interface`. The
+suggested file lists in this plan were directional; the shipped work used a few
+adjacent seams where that produced a smaller, safer change while preserving the
+host-owned lane, DM, and semantic interaction goals.
 
 ## Problem Frame
 
@@ -317,7 +322,7 @@ flowchart TB
   U5 --> U6
 ```
 
-- [ ] **Unit 1: Define normalized lane, actor, and rich reply contracts**
+- [x] **Unit 1: Define normalized lane, actor, and rich reply contracts**
 
 **Goal:** Introduce the public vocabulary for "reply here", "DM this sender",
 and "offer this rich experience with fallback" without exposing raw channel
@@ -396,7 +401,7 @@ implementation details.
 - The contract can describe cross-channel rich/fallback intent without exposing
   vendor endpoint names, token concepts, or raw request payloads.
 
-- [ ] **Unit 2: Add capability projection and fallback planning**
+- [x] **Unit 2: Add capability projection and fallback planning**
 
 **Goal:** Let OpenClaw project rich reply intent into channel-native UI when
 available and into text or command-driven fallback when it is not.
@@ -473,7 +478,7 @@ available and into text or command-driven fallback when it is not.
 - Rich replies can degrade to usable text or command flows without plugin-owned
   vendor logic.
 
-- [ ] **Unit 3: Wire host-owned lane reply and sender-DM helpers**
+- [x] **Unit 3: Wire host-owned lane reply and sender-DM helpers**
 
 **Goal:** Make `api.runtime.channel` capable of delivering generic lane replies
 and sender-targeted DMs through the existing outbound stack, with all vendor
@@ -543,7 +548,7 @@ entry points.
 - Existing route-safety guarantees around `turnSourceChannel` and persisted
   `deliveryContext` remain intact.
 
-- [ ] **Unit 4: Normalize the interaction return path**
+- [x] **Unit 4: Normalize the interaction return path**
 
 **Goal:** Provide a channel-neutral inbound interaction context so native rich
 surfaces and text/command fallbacks can converge on the same plugin-facing
@@ -612,7 +617,7 @@ semantic action model.
 - The core dispatch layer still honors existing dedupe and conversation-binding
   behavior across both native rich interactions and fallback command paths.
 
-- [ ] **Unit 5: Migrate docs and first-party examples to the new default**
+- [x] **Unit 5: Migrate docs and first-party examples to the new default**
 
 **Goal:** Make the host-owned lane and rich reply interface the documented and
 demonstrated primary path for plugin development.
@@ -679,7 +684,7 @@ demonstrated primary path for plugin development.
 - At least one real rich channel example demonstrates channel-native rendering
   and one fallback example demonstrates text/command degradation.
 
-- [ ] **Unit 6: Lock SDK drift, compatibility, and rollout safety**
+- [x] **Unit 6: Lock SDK drift, compatibility, and rollout safety**
 
 **Goal:** Make the new interface durable by aligning exports, generated
 baselines, and compatibility coverage with the new public contract.
