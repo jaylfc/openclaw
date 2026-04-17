@@ -55,7 +55,7 @@ jobs:
           mv "$PKG" "openclaw-taos-fork-linux-${{ matrix.arch }}.tgz"
           ls -la openclaw-taos-fork-linux-*.tgz
 
-      - name: Smoke-test: install the tarball cleanly + run --version
+      - name: "Smoke-test: install the tarball cleanly + run --version"
         run: |
           mkdir /tmp/smoke && cd /tmp/smoke
           npm init -y >/dev/null
