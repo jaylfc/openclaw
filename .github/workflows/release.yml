@@ -1,0 +1,109 @@
+name: Release prebuilt openclaw
+
+on:
+  push:
+    branches: [taos-fork]
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            arch: x64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Enable pnpm via corepack
+        run: |
+          corepack enable
+          corepack prepare pnpm@latest --activate
+
+      - name: Install dependencies (full workspace context)
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+      - name: Verify dist/entry.(m)js exists
+        run: |
+          if [ ! -f dist/entry.js ] && [ ! -f dist/entry.mjs ]; then
+            echo "::error::pnpm build did not produce dist/entry.{js,mjs}"
+            ls -la dist/ | head -30
+            exit 1
+          fi
+          echo "dist/entry exists; tree count:" && find dist -type f | wc -l
+
+      - name: Pack tarball
+        run: |
+          npm pack
+          PKG=$(ls openclaw-*.tgz | head -1)
+          mv "$PKG" "openclaw-taos-fork-linux-${{ matrix.arch }}.tgz"
+          ls -la openclaw-taos-fork-linux-*.tgz
+
+      - name: Smoke-test: install the tarball cleanly + run --version
+        run: |
+          mkdir /tmp/smoke && cd /tmp/smoke
+          npm init -y >/dev/null
+          npm install --silent "$GITHUB_WORKSPACE/openclaw-taos-fork-linux-${{ matrix.arch }}.tgz"
+          test -f node_modules/openclaw/dist/entry.js || test -f node_modules/openclaw/dist/entry.mjs
+          test -f node_modules/openclaw/openclaw.mjs
+          node_modules/.bin/openclaw --version || true
+          echo "smoke pass for ${{ matrix.arch }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: openclaw-${{ matrix.arch }}
+          path: openclaw-taos-fork-linux-${{ matrix.arch }}.tgz
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: openclaw-*
+          merge-multiple: true
+
+      - name: Compute build identifier
+        id: id
+        run: |
+          echo "ts=$(date -u +%Y%m%dT%H%M%S)" >> "$GITHUB_OUTPUT"
+          echo "sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: rolling
+          name: "Latest taos-fork build (${{ steps.id.outputs.ts }} · ${{ steps.id.outputs.sha }})"
+          body: |
+            Rolling release of the latest `taos-fork` branch build.
+            Commit: ${{ github.sha }}
+            Built: ${{ steps.id.outputs.ts }} UTC
+
+            Assets:
+            - `openclaw-taos-fork-linux-arm64.tgz`
+            - `openclaw-taos-fork-linux-x64.tgz`
+
+            Consumers (taOS deployer): use `https://github.com/jaylfc/openclaw/releases/latest/download/openclaw-taos-fork-linux-<arch>.tgz`.
+          files: |
+            openclaw-taos-fork-linux-arm64.tgz
+            openclaw-taos-fork-linux-x64.tgz
+          make_latest: true
+          prerelease: false
