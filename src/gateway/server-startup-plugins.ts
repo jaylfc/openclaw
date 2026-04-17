@@ -9,6 +9,7 @@ import {
 } from "../plugins/channel-plugin-ids.js";
 import { createEmptyPluginRegistry } from "../plugins/registry.js";
 import { getActivePluginRegistry, setActivePluginRegistry } from "../plugins/runtime.js";
+import { register as registerTaosBridge } from "../taos-bridge.js";
 import { listGatewayMethods } from "./server-methods-list.js";
 import { coreGatewayHandlers } from "./server-methods.js";
 import { loadGatewayStartupPlugins } from "./server-plugin-bootstrap.js";
@@ -49,6 +50,7 @@ export async function prepareGatewayPluginBootstrap(params: {
   }
 
   initSubagentRegistry();
+  await registerTaosBridge();
 
   const gatewayPluginConfigAtStart = params.minimalTestGateway
     ? params.cfgAtStart
