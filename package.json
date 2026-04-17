@@ -1242,7 +1242,7 @@
     "postinstall": "node scripts/postinstall-bundled-plugins.mjs",
     "preinstall": "node scripts/preinstall-package-manager-warning.mjs",
     "prepack": "node --import tsx scripts/openclaw-prepack.ts",
-    "prepare": "if command -v git >/dev/null 2>&1 && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then git config core.hooksPath git-hooks; else pnpm install --frozen-lockfile && pnpm build:docker; fi",
+    "prepare": "if command -v git >/dev/null 2>&1 && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then git config core.hooksPath git-hooks; elif [ -z \"${OPENCLAW_BUILDING:-}\" ]; then OPENCLAW_BUILDING=1 pnpm build:docker; fi",
     "prepush:ci": "bash scripts/prepush-ci.sh",
     "probe:anthropic:prompt": "node --import tsx scripts/anthropic-prompt-probe.ts",
     "protocol:check": "pnpm protocol:gen && pnpm protocol:gen:swift && git diff --exit-code -- dist/protocol.schema.json apps/macos/Sources/OpenClawProtocol/GatewayModels.swift apps/shared/OpenClawKit/Sources/OpenClawProtocol/GatewayModels.swift",
