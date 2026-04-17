@@ -3,6 +3,8 @@ node_modules
 .env
 docker-compose.override.yml
 docker-compose.extra.yml
+dist
+dist-runtime
 pnpm-lock.yaml
 bun.lock
 bun.lockb
@@ -112,6 +114,7 @@ apps/shared/OpenClawKit/build/
 Swabble/build/
 
 # Generated protocol schema (produced via pnpm protocol:gen)
+dist/protocol.schema.json
 .ant-colony/
 
 # Eclipse
