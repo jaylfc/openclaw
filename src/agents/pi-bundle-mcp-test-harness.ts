@@ -18,9 +18,7 @@ const tempDirs: string[] = [];
 
 export async function cleanupBundleMcpHarness(): Promise<void> {
   await __testing.resetSessionMcpRuntimeManager();
-  await Promise.all(
-    tempDirs.splice(0, tempDirs.length).map((dir) => fs.rm(dir, { recursive: true, force: true })),
-  );
+  await Promise.all(tempDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
 }
 
 export async function makeTempDir(prefix: string): Promise<string> {
@@ -38,7 +36,7 @@ export async function waitForFileText(filePath: string, timeoutMs = 5_000): Prom
     if (content != null) {
       return content;
     }
-    await new Promise((resolve) => setTimeout(resolve, 25));
+    await new Promise((resolve) => setTimeout(resolve, 5));
   }
   throw new Error(`Timed out waiting for ${filePath}`);
 }
