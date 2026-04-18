@@ -13,14 +13,19 @@
  *    all bundled channels use for inbound messages).
  *  - Posts reply deltas, final messages, and errors back to taOS via
  *    the reply URL in the bootstrap.
+ *  - Subscribes to openclaw's global agent-event bus and forwards
+ *    tool_call / tool_result events (stream === "tool", phase
+ *    start / result) as fire-and-forget bridge posts so taOS traces
+ *    can observe intra-turn tool activity.
  *  - Reconnects with 2-second backoff on any SSE error.
  *  - Shuts down cleanly on SIGTERM/SIGINT (openclaw process exit).
  *
  * Coupling policy:
- *  Only two openclaw internals are imported here:
+ *  Only these openclaw internals are imported here:
  *    a) dispatchReplyFromConfig + withReplyDispatcher (reply pipeline)
  *    b) buildAgentSessionKey (routing)
  *    c) loadConfig (config snapshot)
+ *    d) onAgentEvent (agent-event bus subscription)
  *  All other behaviour is self-contained or uses Node built-ins.
  *  If any import path does not resolve, the bridge logs a clear
  *  error and disables itself — it never monkey-patches internals.
@@ -28,8 +33,6 @@
  *  The models.providers.taos entry is NOT written here.  The taOS
  *  deployer already writes it into /root/.openclaw/openclaw.json
  *  before openclaw starts (schema_version === 1 validates this).
- *
- * Hard cap: ≤ 400 LoC (check with `wc -l src/taos-bridge.ts`).
  */
 
 import type { DispatchFromConfigParams } from "./auto-reply/reply/dispatch-from-config.types.js";
@@ -38,6 +41,7 @@ import type { ReplyDispatcher } from "./auto-reply/reply/reply-dispatcher.types.
 // loaded lazily inside register() to keep startup cost minimal.
 import type { FinalizedMsgContext } from "./auto-reply/templating.js";
 import type { OpenClawConfig } from "./config/types.openclaw.js";
+import type { AgentEventPayload } from "./infra/agent-events.js";
 
 // ── Bootstrap schema (schema_version === 1) ───────────────────────────
 
@@ -92,22 +96,49 @@ type BridgeApis = {
     dmScope?: "main" | "per-peer" | "per-channel-peer" | "per-account-channel-peer";
   }) => string;
   loadConfig: () => OpenClawConfig;
+  onAgentEvent: (listener: (evt: AgentEventPayload) => void) => () => void;
 };
 
 // ── Constants ─────────────────────────────────────────────────────────
 
 const CHANNEL_ID = "taos";
 const RECONNECT_DELAY_MS = 2000;
+const TOOL_RESULT_TRUNCATE_CHARS = 4000;
 
 // ── Module-level abort controller for clean shutdown ──────────────────
 
 let bridgeAbortController: AbortController | null = null;
+let toolEventUnsub: (() => void) | null = null;
+
+/**
+ * Active turn context keyed by openclaw sessionKey.  Populated when a
+ * user_message is dispatched and cleared when the reply pipeline
+ * settles.  Used by the agent-event listener to tag emitted
+ * tool_call / tool_result bridge events with the correct trace_id.
+ */
+type TurnContext = {
+  traceId: string;
+  msgId: string;
+  replyUrl: string;
+  token: string;
+  toolStarts: Map<string, number>;
+};
+const turnContextBySessionKey = new Map<string, TurnContext>();
 
 function shutdownBridge(): void {
   if (bridgeAbortController) {
     bridgeAbortController.abort();
     bridgeAbortController = null;
   }
+  if (toolEventUnsub) {
+    try {
+      toolEventUnsub();
+    } catch {
+      /* best effort */
+    }
+    toolEventUnsub = null;
+  }
+  turnContextBySessionKey.clear();
 }
 
 // ── Bootstrap ─────────────────────────────────────────────────────────
@@ -208,6 +239,75 @@ function buildDispatcher(params: {
   };
 }
 
+// ── Tool-event bridging ───────────────────────────────────────────────
+
+function truncateToolResult(result: unknown): unknown {
+  if (result === undefined || result === null) {
+    return result;
+  }
+  let text: string;
+  try {
+    text = typeof result === "string" ? result : JSON.stringify(result);
+  } catch {
+    text = String(result);
+  }
+  if (text.length > TOOL_RESULT_TRUNCATE_CHARS) {
+    return `${text.slice(0, TOOL_RESULT_TRUNCATE_CHARS)}…[truncated ${text.length - TOOL_RESULT_TRUNCATE_CHARS} chars]`;
+  }
+  return result;
+}
+
+function handleToolEvent(evt: AgentEventPayload): void {
+  if (evt.stream !== "tool") {
+    return;
+  }
+  const sessionKey = evt.sessionKey;
+  if (!sessionKey) {
+    return;
+  }
+  const ctx = turnContextBySessionKey.get(sessionKey);
+  if (!ctx) {
+    return;
+  }
+  const data = evt.data ?? {};
+  const phase = data.phase as string | undefined;
+  const toolName = (data.name as string | undefined) ?? "";
+  const toolCallId = (data.toolCallId as string | undefined) ?? "";
+  if (!phase || !toolCallId) {
+    return;
+  }
+
+  if (phase === "start") {
+    ctx.toolStarts.set(toolCallId, Date.now());
+    void postReply(ctx.replyUrl, ctx.token, {
+      kind: "tool_call",
+      id: ctx.msgId,
+      trace_id: ctx.traceId,
+      tool: toolName,
+      tool_call_id: toolCallId,
+      args: (data.args as Record<string, unknown> | undefined) ?? {},
+    });
+    return;
+  }
+
+  if (phase === "result") {
+    const startedAt = ctx.toolStarts.get(toolCallId);
+    ctx.toolStarts.delete(toolCallId);
+    const durationMs = startedAt ? Date.now() - startedAt : undefined;
+    const isError = Boolean(data.isError);
+    void postReply(ctx.replyUrl, ctx.token, {
+      kind: "tool_result",
+      id: ctx.msgId,
+      trace_id: ctx.traceId,
+      tool: toolName,
+      tool_call_id: toolCallId,
+      result: truncateToolResult(data.result),
+      success: !isError,
+      ...(durationMs !== undefined ? { duration_ms: durationMs } : {}),
+    });
+  }
+}
+
 // ── Inbound dispatch ──────────────────────────────────────────────────
 
 async function dispatchMessage(
@@ -246,6 +346,14 @@ async function dispatchMessage(
     CommandAuthorized: true,
   };
 
+  turnContextBySessionKey.set(sessionKey, {
+    traceId: event.trace_id,
+    msgId: event.id,
+    replyUrl: channel.reply_url,
+    token: channel.auth_bearer,
+    toolStarts: new Map(),
+  });
+
   try {
     await apis.withReplyDispatcher({
       dispatcher,
@@ -260,6 +368,8 @@ async function dispatchMessage(
       trace_id: event.trace_id,
       error: String(err),
     });
+  } finally {
+    turnContextBySessionKey.delete(sessionKey);
   }
 }
 
@@ -389,11 +499,12 @@ export async function register(): Promise<void> {
   // Lazy-load openclaw internals.  Fail loud if any import path broke.
   let apis: BridgeApis;
   try {
-    const [dispatchMod, dispatcherMod, routeMod, configMod] = await Promise.all([
+    const [dispatchMod, dispatcherMod, routeMod, configMod, eventsMod] = await Promise.all([
       import("./auto-reply/reply/dispatch-from-config.js"),
       import("./auto-reply/dispatch-dispatcher.js"),
       import("./routing/resolve-route.js"),
       import("./config/config.js"),
+      import("./infra/agent-events.js"),
     ]);
     apis = {
       dispatchReplyFromConfig:
@@ -401,6 +512,7 @@ export async function register(): Promise<void> {
       withReplyDispatcher: dispatcherMod.withReplyDispatcher,
       buildAgentSessionKey: routeMod.buildAgentSessionKey as BridgeApis["buildAgentSessionKey"],
       loadConfig: configMod.loadConfig,
+      onAgentEvent: eventsMod.onAgentEvent,
     };
   } catch (err) {
     throw new Error(
@@ -421,6 +533,11 @@ export async function register(): Promise<void> {
   bridgeAbortController = new AbortController();
   process.once("SIGTERM", shutdownBridge);
   process.once("SIGINT", shutdownBridge);
+
+  // Subscribe to the global agent-event bus so we can forward tool_call /
+  // tool_result events to the taOS bridge for trace observability.  These
+  // posts are fire-and-forget — failures never abort the tool invocation.
+  toolEventUnsub = apis.onAgentEvent(handleToolEvent);
 
   console.log(
     `[taos-bridge] starting; agent=${agentName} schema_version=${bootstrap.schema_version}`,
