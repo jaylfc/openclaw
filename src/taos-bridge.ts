@@ -97,6 +97,7 @@ type BridgeApis = {
   }) => string;
   loadConfig: () => OpenClawConfig;
   onAgentEvent: (listener: (evt: AgentEventPayload) => void) => () => void;
+  getAgentRunContext: (runId: string) => { sessionKey?: string } | undefined;
 };
 
 // ── Constants ─────────────────────────────────────────────────────────
@@ -257,55 +258,62 @@ function truncateToolResult(result: unknown): unknown {
   return result;
 }
 
-function handleToolEvent(evt: AgentEventPayload): void {
-  if (evt.stream !== "tool") {
-    return;
-  }
-  const sessionKey = evt.sessionKey;
-  if (!sessionKey) {
-    return;
-  }
-  const ctx = turnContextBySessionKey.get(sessionKey);
-  if (!ctx) {
-    return;
-  }
-  const data = evt.data ?? {};
-  const phase = data.phase as string | undefined;
-  const toolName = (data.name as string | undefined) ?? "";
-  const toolCallId = (data.toolCallId as string | undefined) ?? "";
-  if (!phase || !toolCallId) {
-    return;
-  }
+function buildToolEventHandler(
+  getAgentRunContext: BridgeApis["getAgentRunContext"],
+): (evt: AgentEventPayload) => void {
+  return (evt) => {
+    if (evt.stream !== "tool") {
+      return;
+    }
+    // Event sessionKey is blanked for non-webchat channels (see
+    // emitAgentEvent).  Fall back to the stored run context which keeps
+    // the raw sessionKey regardless of control-UI visibility.
+    const sessionKey = evt.sessionKey ?? getAgentRunContext(evt.runId)?.sessionKey;
+    if (!sessionKey) {
+      return;
+    }
+    const ctx = turnContextBySessionKey.get(sessionKey);
+    if (!ctx) {
+      return;
+    }
+    const data = evt.data ?? {};
+    const phase = data.phase as string | undefined;
+    const toolName = (data.name as string | undefined) ?? "";
+    const toolCallId = (data.toolCallId as string | undefined) ?? "";
+    if (!phase || !toolCallId) {
+      return;
+    }
 
-  if (phase === "start") {
-    ctx.toolStarts.set(toolCallId, Date.now());
-    void postReply(ctx.replyUrl, ctx.token, {
-      kind: "tool_call",
-      id: ctx.msgId,
-      trace_id: ctx.traceId,
-      tool: toolName,
-      tool_call_id: toolCallId,
-      args: (data.args as Record<string, unknown> | undefined) ?? {},
-    });
-    return;
-  }
+    if (phase === "start") {
+      ctx.toolStarts.set(toolCallId, Date.now());
+      void postReply(ctx.replyUrl, ctx.token, {
+        kind: "tool_call",
+        id: ctx.msgId,
+        trace_id: ctx.traceId,
+        tool: toolName,
+        tool_call_id: toolCallId,
+        args: (data.args as Record<string, unknown> | undefined) ?? {},
+      });
+      return;
+    }
 
-  if (phase === "result") {
-    const startedAt = ctx.toolStarts.get(toolCallId);
-    ctx.toolStarts.delete(toolCallId);
-    const durationMs = startedAt ? Date.now() - startedAt : undefined;
-    const isError = Boolean(data.isError);
-    void postReply(ctx.replyUrl, ctx.token, {
-      kind: "tool_result",
-      id: ctx.msgId,
-      trace_id: ctx.traceId,
-      tool: toolName,
-      tool_call_id: toolCallId,
-      result: truncateToolResult(data.result),
-      success: !isError,
-      ...(durationMs !== undefined ? { duration_ms: durationMs } : {}),
-    });
-  }
+    if (phase === "result") {
+      const startedAt = ctx.toolStarts.get(toolCallId);
+      ctx.toolStarts.delete(toolCallId);
+      const durationMs = startedAt ? Date.now() - startedAt : undefined;
+      const isError = Boolean(data.isError);
+      void postReply(ctx.replyUrl, ctx.token, {
+        kind: "tool_result",
+        id: ctx.msgId,
+        trace_id: ctx.traceId,
+        tool: toolName,
+        tool_call_id: toolCallId,
+        result: truncateToolResult(data.result),
+        success: !isError,
+        ...(durationMs !== undefined ? { duration_ms: durationMs } : {}),
+      });
+    }
+  };
 }
 
 // ── Inbound dispatch ──────────────────────────────────────────────────
@@ -513,6 +521,7 @@ export async function register(): Promise<void> {
       buildAgentSessionKey: routeMod.buildAgentSessionKey as BridgeApis["buildAgentSessionKey"],
       loadConfig: configMod.loadConfig,
       onAgentEvent: eventsMod.onAgentEvent,
+      getAgentRunContext: eventsMod.getAgentRunContext,
     };
   } catch (err) {
     throw new Error(
@@ -537,7 +546,7 @@ export async function register(): Promise<void> {
   // Subscribe to the global agent-event bus so we can forward tool_call /
   // tool_result events to the taOS bridge for trace observability.  These
   // posts are fire-and-forget — failures never abort the tool invocation.
-  toolEventUnsub = apis.onAgentEvent(handleToolEvent);
+  toolEventUnsub = apis.onAgentEvent(buildToolEventHandler(apis.getAgentRunContext));
 
   console.log(
     `[taos-bridge] starting; agent=${agentName} schema_version=${bootstrap.schema_version}`,
