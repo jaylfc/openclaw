@@ -1,0 +1,49 @@
+name: Sync upstream main
+
+# Keeps the fork's `main` branch in lockstep with
+# `openclaw/openclaw:main`. Runs Monday 09:00 UTC and on-demand.
+#
+# Strategy: fast-forward only. If the fork's main has diverged (e.g.
+# someone committed to it directly), the workflow fails loudly instead
+# of silently creating a merge commit — the human is expected to
+# investigate.
+#
+# The long-lived `taos-fork` branch is NOT touched here. That branch
+# carries fork-specific bridge + release wiring and needs a manual
+# review when pulling upstream in.
+
+on:
+  schedule:
+    - cron: '0 9 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Configure git identity
+        run: |
+          git config user.name "jaylfc"
+          git config user.email "jaylfc25@gmail.com"
+
+      - name: Fast-forward main from openclaw/openclaw
+        run: |
+          git remote add upstream https://github.com/openclaw/openclaw.git
+          git fetch upstream main --depth=200
+          before=$(git rev-parse HEAD)
+          git merge --ff-only upstream/main
+          after=$(git rev-parse HEAD)
+          if [ "$before" = "$after" ]; then
+            echo "main already up to date ($after)"
+          else
+            echo "fast-forwarded main: $before -> $after"
+            git push origin main
+          fi
