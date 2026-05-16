@@ -111,12 +111,26 @@ function ensureOpenClawExtensionAlias(params) {
       "./plugin-sdk/*": "./plugin-sdk/*.js",
     },
   });
-  ensureSymlink(
-    relativeSymlinkTarget(pluginSdkDir, pluginSdkAliasPath),
-    pluginSdkAliasPath,
-    symlinkType(),
-    pluginSdkDir,
-  );
+  // Real wrapper files at the alias path instead of a symlinked directory.
+  // The bundled-channel-entry smoke runs Node with --preserve-symlinks; a
+  // symlinked directory means relative imports like
+  // `../channel-entry-contract-<hash>.js` resolve against the SYMLINKED path
+  // (`dist/extensions/node_modules/openclaw/`) instead of the real location
+  // (`dist/`), so the hashed chunk file appears missing even though it sits
+  // at `dist/<hash>.js`. Wrappers sidestep the symlink-resolution gap by
+  // re-exporting from the real source via a relative specifier that Node
+  // resolves before any preserve-symlinks logic kicks in.
+  removePathIfExists(pluginSdkAliasPath);
+  fs.mkdirSync(pluginSdkAliasPath, { recursive: true });
+  for (const dirent of fs.readdirSync(pluginSdkDir, { withFileTypes: true })) {
+    if (!dirent.isFile() || path.extname(dirent.name) !== ".js") {
+      continue;
+    }
+    writeRuntimeModuleWrapper(
+      path.join(pluginSdkDir, dirent.name),
+      path.join(pluginSdkAliasPath, dirent.name),
+    );
+  }
 }
 
 function shouldWrapRuntimeJsFile(sourcePath) {
